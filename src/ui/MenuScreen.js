@@ -24,7 +24,7 @@ export class MenuScreen {
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a2a 100%);
+            background: url('/assets/Axie Legends.jpg') center/cover no-repeat;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -33,39 +33,89 @@ export class MenuScreen {
             font-family: 'Segoe UI', Arial, sans-serif;
             overflow-y: auto;
             padding: 20px;
+            animation: menuFadeIn 0.6s ease-out;
         `;
 
-        const title = document.createElement('h1');
-        title.textContent = '⚔️ AXIE LEGENDS ⚔️';
-        title.style.cssText = `
-            font-size: 56px;
-            font-weight: bold;
-            color: #ffdd44;
-            text-shadow: 0 0 30px rgba(255,220,68,0.3), 0 0 60px rgba(255,220,68,0.1);
-            margin-bottom: 8px;
-            letter-spacing: 4px;
+        // Overlay oscuro
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.40);
+            z-index: 1;
+        `;
+        this.container.appendChild(overlay);
+
+        // Estilos
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes menuFadeIn {
+                from { opacity: 0; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1); }
+            }
+            .menu-card { 
+                transition: all 0.3s ease; 
+                position: relative;
+                margin: 0;
+                transform: scale(1);
+                transform-origin: center center;
+                cursor: pointer;
+            }
+            .menu-card:hover { 
+                transform: scale(0.90) !important;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important; 
+            }
+            .menu-card.selected { 
+                border-color: #ffdd44 !important; 
+                box-shadow: 0 0 30px rgba(255,220,68,0.3), 0 4px 20px rgba(0,0,0,0.4) !important;
+                transform: scale(0.95) !important;
+            }
+            .btn-5v5 { 
+                cursor: not-allowed !important;
+                background: rgba(255,255,255,0.12) !important;
+                border: 2px solid rgba(255,255,255,0.25) !important;
+                color: rgba(255,255,255,0.8) !important;
+                backdrop-filter: blur(8px);
+            }
+            .btn-5v5:hover { 
+                transform: none !important; 
+                box-shadow: none !important; 
+            }
+            .menu-play-btn {
+                transition: all 0.3s ease;
+            }
+            .menu-play-btn:hover {
+                transform: scale(1.05);
+                box-shadow: 0 0 40px rgba(68,255,136,0.4);
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Contenido (z-index: 2)
+        const content = document.createElement('div');
+        content.style.cssText = `
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 1000px;
+            margin-top: 100px;
         `;
 
-        const subtitle = document.createElement('p');
-        subtitle.textContent = 'Elige tu Axie y comienza la batalla';
-        subtitle.style.cssText = `
-            font-size: 18px;
-            color: #88aaff;
-            margin-bottom: 25px;
-            letter-spacing: 2px;
-        `;
-
-        this.container.appendChild(title);
-        this.container.appendChild(subtitle);
-
+        // Contenedor de tarjetas
         const selectionContainer = document.createElement('div');
         selectionContainer.style.cssText = `
             display: flex;
-            gap: 16px;
+            gap: 12px;
             flex-wrap: wrap;
             justify-content: center;
-            max-width: 1000px;
-            margin-bottom: 25px;
+            max-width: 800px;
+            margin-bottom: 20px;
         `;
 
         const axies = getAllAxies();
@@ -74,18 +124,19 @@ export class MenuScreen {
             selectionContainer.appendChild(card);
         });
 
-        this.container.appendChild(selectionContainer);
+        content.appendChild(selectionContainer);
 
+        // Botones
         const buttonsContainer = document.createElement('div');
         buttonsContainer.style.cssText = `
             display: flex;
-            gap: 30px;
-            margin-top: 10px;
+            gap: 25px;
+            margin-top: 8px;
             flex-wrap: wrap;
             justify-content: center;
         `;
 
-        const btn1v1 = this.createGameButton('⚔️ 1 vs 1', 'Disponible', '#44ff88', () => {
+        const btn1v1 = this.createGameButton('1 vs 1', 'Disponible', '#44ff88', () => {
             if (this.selectedAxie) {
                 this.hide();
                 if (this.onStartGame) {
@@ -97,56 +148,15 @@ export class MenuScreen {
         }, false);
         buttonsContainer.appendChild(btn1v1);
 
-        const btn5v5 = this.createGameButton('🌟 5 vs 5', 'Próximamente', '#666666', () => {
+        const btn5v5 = this.createGameButton('5 vs 5', 'Próximamente', '#888899', () => {
             this.showToast('🌟 Modo 5 vs 5 en desarrollo... ¡Pronto disponible!');
         }, true);
         buttonsContainer.appendChild(btn5v5);
 
-        this.container.appendChild(buttonsContainer);
+        content.appendChild(buttonsContainer);
 
-        this.infoPanel = document.createElement('div');
-        this.infoPanel.id = 'axie-info-panel';
-        this.infoPanel.style.cssText = `
-            margin-top: 18px;
-            padding: 16px 24px;
-            background: rgba(0,0,0,0.6);
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            min-width: 350px;
-            text-align: center;
-            color: #fff;
-            transition: all 0.3s ease;
-            max-width: 600px;
-        `;
-        this.updateInfoPanel(axies[0]);
-        this.container.appendChild(this.infoPanel);
-
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-            .menu-card { 
-                transition: all 0.3s ease; 
-                position: relative;
-                margin: 0;
-                transform: scale(1);
-                transform-origin: center center;
-            }
-            .menu-card:hover { 
-                transform: scale(0.95) !important;
-                box-shadow: 0 5px 20px rgba(0,0,0,0.4); 
-            }
-            .menu-card.selected { 
-                border-color: #ffdd44 !important; 
-                box-shadow: 0 0 30px rgba(255,220,68,0.3) !important;
-                transform: scale(1) !important;
-            }
-            .btn-5v5 { opacity: 0.5 !important; cursor: not-allowed !important; filter: grayscale(0.5); }
-            .btn-5v5:hover { transform: none !important; box-shadow: none !important; }
-        `;
-        document.head.appendChild(style);
-
+        this.container.appendChild(content);
         document.body.appendChild(this.container);
-        this.container.style.animation = 'fadeIn 0.5s ease-out';
     }
 
     createAxieCard(axie, isDefault = false) {
@@ -158,39 +168,52 @@ export class MenuScreen {
         }
         card.dataset.axieId = axie.id;
 
+        const emojis = {
+            bing: '🐻',
+            kibo: '🐱',
+            kotaro: '🦊',
+            paladill: '🐉',
+            pomodoro: '🍅',
+            tripp: '🦄',
+            xia: '⭐'
+        };
+
+        const iconEmoji = emojis[axie.id] || axie.habilidades?.pasiva?.icono || '🐾';
+
         card.style.cssText = `
-            width: 140px;
-            padding: 14px;
-            background: rgba(255,255,255,0.05);
-            border: 2px solid ${isDefault ? '#ffdd44' : 'rgba(255,255,255,0.1)'};
-            border-radius: 14px;
+            width: 110px;
+            padding: 10px 8px;
+            background: rgba(255,255,255,0.08);
+            border: 2px solid ${isDefault ? '#ffdd44' : 'rgba(255,255,255,0.15)'};
+            border-radius: 12px;
             cursor: pointer;
             text-align: center;
             color: #fff;
             backdrop-filter: blur(10px);
-            box-shadow: ${isDefault ? '0 0 30px rgba(255,220,68,0.2)' : 'none'};
+            box-shadow: ${isDefault ? '0 0 30px rgba(255,220,68,0.15)' : 'none'};
             transition: all 0.3s ease;
             position: relative;
             margin: 0;
-            transform: scale(1);
+            transform: ${isDefault ? 'scale(0.95)' : 'scale(1)'};
             transform-origin: center center;
         `;
 
         const icon = document.createElement('div');
-        icon.style.cssText = `font-size: 40px; margin-bottom: 4px;`;
-        icon.textContent = axie.habilidades.pasiva.icono || '🐾';
+        icon.style.cssText = `font-size: 32px; margin-bottom: 2px;`;
+        icon.textContent = iconEmoji;
 
         const name = document.createElement('div');
         name.style.cssText = `
-            font-size: 16px;
+            font-size: 13px;
             font-weight: bold;
             color: ${axie.color || '#ffffff'};
-            margin-bottom: 2px;
+            margin-bottom: 1px;
+            text-shadow: 0 0 10px rgba(0,0,0,0.5);
         `;
         name.textContent = axie.nombre;
 
         const type = document.createElement('div');
-        type.style.cssText = `font-size: 11px; color: #88aaff; opacity: 0.6;`;
+        type.style.cssText = `font-size: 10px; color: #88aaff; opacity: 0.5;`;
         type.textContent = axie.id.toUpperCase();
 
         card.appendChild(icon);
@@ -200,17 +223,17 @@ export class MenuScreen {
         card.addEventListener('click', () => {
             document.querySelectorAll('.menu-card').forEach(c => {
                 c.classList.remove('selected');
-                c.style.borderColor = 'rgba(255,255,255,0.1)';
+                c.style.borderColor = 'rgba(255,255,255,0.15)';
                 c.style.boxShadow = 'none';
                 c.style.transform = 'scale(1)';
+                c.style.transition = 'all 0.3s ease';
             });
             card.classList.add('selected');
             card.style.borderColor = '#ffdd44';
-            card.style.boxShadow = '0 0 30px rgba(255,220,68,0.3)';
-            card.style.transform = 'scale(1)';
+            card.style.boxShadow = '0 0 30px rgba(255,220,68,0.3), 0 4px 20px rgba(0,0,0,0.4)';
+            card.style.transform = 'scale(0.95)';
 
             this.selectedAxie = axie.id;
-            this.updateInfoPanel(axie);
 
             if (this.onSelectAxie) {
                 this.onSelectAxie(axie.id);
@@ -220,87 +243,65 @@ export class MenuScreen {
         return card;
     }
 
-    updateInfoPanel(axie) {
-        if (!this.infoPanel) return;
-
-        const hab = axie.habilidades || { pasiva: {}, activa: {}, definitiva: {} };
-        const pasiva = hab.pasiva || { nombre: 'Sin pasiva', descripcion: '', icono: '' };
-        const activa = hab.activa || { nombre: 'Sin habilidad', descripcion: '', icono: '' };
-        const definitiva = hab.definitiva || { nombre: 'Sin definitiva', descripcion: '', icono: '' };
-        const stats = axie.stats || { vida: 0, ataque: 0, defensa: 0, velocidad: 0 };
-
-        this.infoPanel.innerHTML = `
-            <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;">
-                <span style="font-size:28px;">${pasiva.icono || '🐾'}</span>
-                <div>
-                    <div style="font-size:20px;font-weight:bold;color:${axie.color || '#ffffff'};">${axie.nombre}</div>
-                    <div style="font-size:13px;color:#88aaff;">${axie.descripcion || ''}</div>
-                </div>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0;font-size:12px;">
-                <div>❤️ ${stats.vida || 0}</div>
-                <div>⚔️ ${stats.ataque || 0}</div>
-                <div>🛡️ ${stats.defensa || 0}</div>
-                <div>💨 ${stats.velocidad || 0}</div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12px;text-align:left;">
-                <div style="background:rgba(68,255,136,0.1);padding:6px 10px;border-radius:6px;border-left:3px solid #44ff88;">
-                    <div style="font-weight:bold;font-size:11px;color:#44ff88;">PASIVA</div>
-                    <div style="font-weight:bold;">${pasiva.icono || ''} ${pasiva.nombre || 'Sin pasiva'}</div>
-                    <div style="font-size:10px;color:#aaa;">${pasiva.descripcion || ''}</div>
-                </div>
-                <div style="background:rgba(68,170,255,0.1);padding:6px 10px;border-radius:6px;border-left:3px solid #44aaff;">
-                    <div style="font-weight:bold;font-size:11px;color:#44aaff;">ACTIVA</div>
-                    <div style="font-weight:bold;">${activa.icono || ''} ${activa.nombre || 'Sin habilidad'}</div>
-                    <div style="font-size:10px;color:#aaa;">${activa.descripcion || ''}</div>
-                    <div style="font-size:10px;color:#88aaff;">CD: ${activa.cooldown || 0}s</div>
-                </div>
-                <div style="background:rgba(255,170,68,0.1);padding:6px 10px;border-radius:6px;border-left:3px solid #ffaa44;">
-                    <div style="font-weight:bold;font-size:11px;color:#ffaa44;">DEFINITIVA</div>
-                    <div style="font-weight:bold;">${definitiva.icono || ''} ${definitiva.nombre || 'Sin definitiva'}</div>
-                    <div style="font-size:10px;color:#aaa;">${definitiva.descripcion || ''}</div>
-                    <div style="font-size:10px;color:#ffaa44;">CD: ${definitiva.cooldown || 0}s</div>
-                </div>
-            </div>
-        `;
-    }
-
     createGameButton(label, subLabel, color, onClick, isDisabled = false) {
         const btn = document.createElement('button');
-        btn.className = isDisabled ? 'btn-5v5' : '';
-        btn.style.cssText = `
-            padding: 14px 40px;
-            font-size: 20px;
-            font-weight: bold;
-            background: ${isDisabled ? 'rgba(255,255,255,0.05)' : `linear-gradient(135deg, ${color}, ${color}dd)`};
-            color: ${isDisabled ? '#666' : '#fff'};
-            border: ${isDisabled ? '2px solid rgba(255,255,255,0.1)' : `2px solid ${color}`};
-            border-radius: 14px;
-            cursor: ${isDisabled ? 'not-allowed' : 'pointer'};
-            transition: all 0.3s ease;
-            box-shadow: ${isDisabled ? 'none' : `0 0 30px ${color}33`};
-            font-family: 'Segoe UI', Arial, sans-serif;
-            min-width: 180px;
-            opacity: ${isDisabled ? 0.5 : 1};
-        `;
+        btn.className = isDisabled ? 'btn-5v5' : 'menu-play-btn';
+        
+        // 🔹 Si es el botón "5 vs 5", usar estilo más visible
+        if (isDisabled) {
+            btn.style.cssText = `
+                padding: 10px 30px;
+                font-size: 18px;
+                font-weight: bold;
+                background: rgba(255,255,255,0.12);
+                color: rgba(255,255,255,0.85);
+                border: 2px solid rgba(255,255,255,0.25);
+                border-radius: 12px;
+                cursor: not-allowed;
+                transition: all 0.3s ease;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                min-width: 140px;
+                backdrop-filter: blur(8px);
+                box-shadow: 0 0 20px rgba(255,255,255,0.05);
+            `;
+        } else {
+            btn.style.cssText = `
+                padding: 10px 30px;
+                font-size: 18px;
+                font-weight: bold;
+                background: linear-gradient(135deg, ${color}, ${color}dd);
+                color: #fff;
+                border: 2px solid ${color};
+                border-radius: 12px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                box-shadow: 0 0 20px ${color}33;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                min-width: 140px;
+            `;
+        }
+
         if (!isDisabled) {
             btn.onmouseenter = () => {
                 btn.style.transform = 'scale(1.05)';
-                btn.style.boxShadow = `0 0 50px ${color}55`;
+                btn.style.boxShadow = `0 0 40px ${color}55`;
             };
             btn.onmouseleave = () => {
                 btn.style.transform = 'scale(1)';
-                btn.style.boxShadow = `0 0 30px ${color}33`;
+                btn.style.boxShadow = `0 0 20px ${color}33`;
             };
         }
+
         const mainText = document.createElement('div');
         mainText.textContent = label;
-        mainText.style.fontSize = '22px';
+        mainText.style.fontSize = '18px';
+        
         const subText = document.createElement('div');
         subText.textContent = subLabel;
-        subText.style.fontSize = '13px';
-        subText.style.opacity = '0.7';
-        subText.style.marginTop = '2px';
+        subText.style.fontSize = '11px';
+        subText.style.opacity = '0.6';
+        subText.style.marginTop = '1px';
+        
         btn.appendChild(mainText);
         btn.appendChild(subText);
         btn.addEventListener('click', onClick);
@@ -315,15 +316,15 @@ export class MenuScreen {
             bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 14px 28px;
+            padding: 12px 24px;
             background: rgba(0,0,0,0.9);
             color: #ffdd44;
             border: 1px solid #ffdd44;
-            border-radius: 12px;
-            font-size: 16px;
+            border-radius: 10px;
+            font-size: 15px;
             font-family: 'Segoe UI', Arial, sans-serif;
             z-index: 3000;
-            animation: fadeIn 0.3s ease-out;
+            animation: menuFadeIn 0.3s ease-out;
             box-shadow: 0 0 30px rgba(255,220,68,0.2);
         `;
         document.body.appendChild(toast);

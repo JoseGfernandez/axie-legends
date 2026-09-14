@@ -1,5 +1,5 @@
 ﻿window.axieHubData = {
-    name: 'Puff',
+    name: 'Bing',
     level: 1,
     maxHealth: 500,
     health: 500,

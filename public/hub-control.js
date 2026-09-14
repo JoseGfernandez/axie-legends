@@ -1,5 +1,5 @@
 ﻿const axieData = {
-    name: 'Puff',
+    name: 'Bing',
     level: 1,
     maxHealth: 500,
     health: 500,
@@ -82,9 +82,9 @@ function updateSkillUI() {
     });
     const nameEl = document.querySelector('#axie-name .name');
     if (nameEl && skillPoints > 0) {
-        nameEl.textContent = '⚔️ Puff ✨+' + skillPoints;
+        nameEl.textContent = '⚔️ Bing ✨+' + skillPoints;
     } else if (nameEl) {
-        nameEl.textContent = '⚔️ Puff';
+        nameEl.textContent = '⚔️ Bing';
     }
 }
 

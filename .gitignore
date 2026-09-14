@@ -13,7 +13,6 @@ desktop.ini
 *.bak
 *.backup
 *.old
-respaldo_*/
 
 # Editor
 .vscode/
