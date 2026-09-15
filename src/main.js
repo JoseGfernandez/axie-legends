@@ -23,8 +23,8 @@ const CONFIG = {
     nexusHealth: 1000,
     meleeSpacing: 1.1,
     mageSpacing: 0.9,
-    meleeSpeed: 1.1,
-    mageSpeed: 1.1,
+    meleeSpeed: 0.48,
+    mageSpeed: 0.42,
     axieSpeed: 1.5,
     smoothSpeed: 2.5,
     cameraSmoothSpeed: 3.0,
@@ -35,13 +35,46 @@ const CONFIG = {
     reevaluationTime: 2.0,
     chaseTime: 3.0,
     playerMaxHealth: 200,
+    playerMaxMana: 200,
     enemyMaxHealth: 200,
     RESPAWN_TIME: 3.0,
     AXIE_SPAWN_DELAY: 5.0,
     firstWaveGhostDuration: 28,
     SHOP_INTERACTION_DISTANCE: 6.0,
-    SHOP_AUTO_OPEN_DISTANCE: 2.0,
+    SHOP_AUTO_OPEN_DISTANCE: 2.5,
     SHOP_POTION_LIMIT: 10,
+    AXIE_SPAWN_TIME: 3.0,
+    MINION_SPAWN_TIME: 15.0,
+    SHOP_AUTO_OPEN_COOLDOWN: 1.5,
+    MINION_LANE_LIMIT_X: 2.0,
+    MINION_LANE_LIMIT_Z: 24,
+    MINION_MAX_Z_ALLY: 16.5,
+    MINION_MAX_Z_ENEMY: -16.5,
+    AXIE_RETREAT_SAFE_DISTANCE: 1.5,
+    AXIE_POTION_USE_THRESHOLD: 0.50,
+    AXIE_POTION_BUY_THRESHOLD: 300,
+    AXIE_MAX_POTIONS: 10,
+    AXIE_POTION_HEAL: 80,
+    AXIE_POTION_COST: 50,
+    AXIE_RETREAT_MIN_TIME: 1.5,
+    AXIE_RETREAT_COOLDOWN: 3.0,
+    SPAWN_STAGGER_DELAY: 1.0,
+    AXIE_SHOP_DAMAGE_MEMORY: 3.0,
+    AXIE_SHOP_HP_MIN: 0.60,
+    AXIE_SHOP_CANCEL_HP: 0.50,
+    AXIE_SHOP_CANCEL_DAMAGE_MEMORY: 2.0,
+    AXIE_SHOP_ENEMY_NEARBY_RADIUS: 6.0,
+    MINION_AGGRO_TO_AXIE: 7.0,
+    AXIE_AGGRO_TO_PLAYER: 10.0,
+    MINION_AGGRO_RANGE: 10.0,
+    MINION_AGGRO_RANGE_EXTENDED: 15.0,
+    MAX_ITEM_SLOTS: 6,
+    POTION_USE_COOLDOWN: 1.5,
+    DEPLOY_TRIGGER_DIST: 0.5,
+    MINION_TOWER_ATTACK_RANGE: 25,
+
+    // 🔧 FIX: Ruta base de los Axies
+    AXIES_BASE_PATH: '/public/assets/axies/',
 
     MINION_GLB_MAGE_ENEMY: '/public/assets/minions/mage2_bone.glb',
     MINION_GLB_MELEE_ENEMY: null,
@@ -81,9 +114,53 @@ const CONFIG = {
     MINION_COLLISION_DISTANCE: 0.75,
 };
 
-// ═══════════════════════════════════════════════════════════════
-// 💰 SISTEMA DE ECONOMÍA
-// ═══════════════════════════════════════════════════════════════
+// 🔧 FIX: Función auxiliar para resolver rutas de Axies
+function getAxieModelPath(axieData) {
+    if (!axieData) return CONFIG.AXIES_BASE_PATH + 'bing.glb';
+    
+    // Si el modelo ya viene con ruta completa, usarlo
+    if (axieData.modelo && axieData.modelo.startsWith('/')) {
+        // 🔧 FIX: Si tiene ruta vieja, redirigir a nueva carpeta
+        if (axieData.modelo.includes('/axie-3d-assets/')) {
+            const fileName = axieData.modelo.split('/').pop();
+            return CONFIG.AXIES_BASE_PATH + fileName;
+        }
+        return axieData.modelo;
+    }
+    
+    // Si solo viene el nombre, agregar la ruta base
+    if (axieData.modelo) {
+        return CONFIG.AXIES_BASE_PATH + axieData.modelo;
+    }
+    
+    // Fallback: usar id
+    if (axieData.id) {
+        return CONFIG.AXIES_BASE_PATH + axieData.id + '.glb';
+    }
+    
+    return CONFIG.AXIES_BASE_PATH + 'bing.glb';
+}
+
+function clampMinionToLane(minion) {
+    if (!minion || !minion.group) return;
+    const limX = CONFIG.MINION_LANE_LIMIT_X;
+    const limZ = CONFIG.MINION_LANE_LIMIT_Z;
+    
+    if (minion.group.position.x > limX) minion.group.position.x = limX;
+    else if (minion.group.position.x < -limX) minion.group.position.x = -limX;
+    
+    if (minion.isEnemy) {
+        if (minion.group.position.z < CONFIG.MINION_MAX_Z_ENEMY) {
+            minion.group.position.z = CONFIG.MINION_MAX_Z_ENEMY;
+        }
+        if (minion.group.position.z > limZ) minion.group.position.z = limZ;
+    } else {
+        if (minion.group.position.z > CONFIG.MINION_MAX_Z_ALLY) {
+            minion.group.position.z = CONFIG.MINION_MAX_Z_ALLY;
+        }
+        if (minion.group.position.z < -limZ) minion.group.position.z = -limZ;
+    }
+}
 
 const ECONOMY = {
     PLAYER_STARTING_GOLD: 100,
@@ -102,23 +179,24 @@ const ECONOMY = {
 
 const PLAYER_SHOP_CATALOG = {
     potions: {
-        hp: { id: 'hp', emoji: '🧪', name: 'Poción de HP', desc: '+50 HP', color: '#ff6644', cost: 25, max: 5,
+        hp: { id: 'hp', emoji: '🧪', name: 'Poción de HP', desc: '+50 HP (click en HUD)', color: '#ff6644', cost: 25, max: 10,
             apply: () => { playerHealth = Math.min(playerMaxHealth, playerHealth + 50); updatePlayerHUD(); } },
-        mp: { id: 'mp', emoji: '💧', name: 'Poción de MP', desc: '+50 MP', color: '#44aaff', cost: 20, max: 5, apply: () => {} }
+        mp: { id: 'mp', emoji: '💧', name: 'Poción de MP', desc: '+50 MP (click en HUD)', color: '#44aaff', cost: 20, max: 10,
+            apply: () => { playerMana = Math.min(playerMaxMana, playerMana + 50); updatePlayerHUD(); } }
     },
     items: {
-        botas:  { id: 'botas',  emoji: '👢', name: 'Botas',  desc: '+10% velocidad',      color: '#88ff88', cost: 80,  maxStack: 3, stackable: true, apply: () => { playerSpeed *= 1.10; } },
-        espada: { id: 'espada', emoji: '⚔️', name: 'Espada', desc: '+15% daño',           color: '#ff8844', cost: 100, maxStack: 4, stackable: true, apply: () => { attackDamage = Math.round(attackDamage * 1.15); } },
-        arco:   { id: 'arco',   emoji: '🏹', name: 'Arco',   desc: '+12% vel. ataque',    color: '#ffaa44', cost: 90,  maxStack: 3, stackable: true, apply: () => { attackSpeed = Math.max(0.2, attackSpeed * 0.88); } },
-        baculo: { id: 'baculo', emoji: '🔮', name: 'Báculo', desc: '+0.5 rango',          color: '#aa88ff', cost: 110, maxStack: 3, stackable: true, apply: () => { attackRange += 0.5; } },
-        daga:   { id: 'daga',   emoji: '🗡️', name: 'Daga',   desc: '+10% vel, +8% daño', color: '#ff4488', cost: 95,  maxStack: 3, stackable: true, apply: () => { playerSpeed *= 1.10; attackDamage = Math.round(attackDamage * 1.08); } }
+        botas:  { id: 'botas',  emoji: '👢', name: 'Botas',  desc: '+10% velocidad',      color: '#88ff88', cost: 80,  apply: () => { playerSpeed *= 1.10; } },
+        espada: { id: 'espada', emoji: '⚔️', name: 'Espada', desc: '+15% daño',           color: '#ff8844', cost: 100, apply: () => { attackDamage = Math.round(attackDamage * 1.15); } },
+        arco:   { id: 'arco',   emoji: '🏹', name: 'Arco',   desc: '+12% vel. ataque',    color: '#ffaa44', cost: 90,  apply: () => { attackSpeed = Math.max(0.2, attackSpeed * 0.88); } },
+        baculo: { id: 'baculo', emoji: '🔮', name: 'Báculo', desc: '+0.5 rango',          color: '#aa88ff', cost: 110, apply: () => { attackRange += 0.5; } },
+        daga:   { id: 'daga',   emoji: '🗡️', name: 'Daga',   desc: '+10% vel, +8% daño', color: '#ff4488', cost: 95,  apply: () => { playerSpeed *= 1.10; attackDamage = Math.round(attackDamage * 1.08); } }
     }
 };
 
 let playerGold = 0;
 let playerKillStreak = 0;
 let playerFirstBlood = false;
-let playerItemsOwned = {};
+let playerItemSlots = [null, null, null, null, null, null];
 let playerDeathCount = 0;
 const PLAYER_DEATH_PENALTIES = [3, 6, 9];
 
@@ -148,7 +226,7 @@ function suavizarYEntidades(delta) {
         if (Math.abs(diff) > 0.001) entity.group.position.y += diff * factor;
         else entity.group.position.y = GROUND_Y;
     }
-    if (playerModel && !isPlayerDead && smoothPlayerPos) {
+    if (playerModel && !isPlayerDead && smoothPlayerPos && playerSpawned) {
         smoothPlayerPos.y = GROUND_Y;
         playerModel.position.y = GROUND_Y;
     }
@@ -156,9 +234,12 @@ function suavizarYEntidades(delta) {
 
 let playerHealth = CONFIG.playerMaxHealth;
 let playerMaxHealth = CONFIG.playerMaxHealth;
+let playerMana = CONFIG.playerMaxMana;
+let playerMaxMana = CONFIG.playerMaxMana;
 let isPlayerDead = false;
 let playerRespawnTimer = 0;
 let playerAttackTarget = null;
+let playerSpawned = false;
 let gameTime = 0;
 let isFirstWave = true;
 let firstWaveTimer = 0;
@@ -171,10 +252,13 @@ let selectedAxieId = 'bestia';
 let axieLoaded = false;
 let currentAxieName = 'Bing';
 
+let potionHPCount = 0;
+let potionMPCount = 0;
+let potionUseCooldown = 0;
+
 let isAutoWalkingToShop = false;
 let autoWalkShopTarget = null;
 
-// 🎯 COORDINACIÓN
 const factionFocusTarget = {
     ally: { target: null, count: 0, timestamp: 0 },
     enemy: { target: null, count: 0, timestamp: 0 }
@@ -196,7 +280,6 @@ function getFactionFocusCount(faction, target) {
     return focus.count;
 }
 
-// 🤖 IA vs IA
 let isAITrainingMode = false;
 let aiTrainingMatches = 0;
 let aiTrainingStartTime = 0;
@@ -205,7 +288,6 @@ let aiTrainingIsRestarting = false;
 let playerAITarget = null;
 let playerAITargetTimer = 0;
 
-// 🎥 CÁMARA DINÁMICA
 let dynamicCameraTarget = null;
 let dynamicCameraTimer = 0;
 let dynamicCameraMode = 'player';
@@ -218,7 +300,6 @@ const DYNAMIC_CAMERA_ENEMY_DURATION = [10, 18];
 const DYNAMIC_CAMERA_IDLE_DURATION = [4, 8];
 const DYNAMIC_CAMERA_MIN_HOLD = 8;
 
-// 💰 IA economía
 let playerAIGold = 0;
 let playerAIItems = {};
 let playerAIBonuses = { speedMultiplier: 1.0, damageMultiplier: 1.0, attackSpeedMultiplier: 1.0, rangeBonus: 0, critChance: 0 };
@@ -227,6 +308,7 @@ let playerAIShopUses = 0;
 const PLAYER_AI_SHOP_COOLDOWN = 8.0;
 const PLAYER_AI_SHOP_MAX_USES = 3;
 let playerAIIsShopping = false;
+let playerAIShopInteractionTimer = 0;
 
 const PLAYER_GOLD_PER_MINION_KILL = 15;
 const PLAYER_GOLD_PER_ENEMY_AXIE_KILL = 50;
@@ -234,10 +316,10 @@ const PLAYER_GOLD_PER_TOWER_KILL = 80;
 const PLAYER_GOLD_PER_NEXUS_KILL = 150;
 const PLAYER_GOLD_PASSIVE_PER_WAVE = 25;
 
-// 🚨 RETROCESO
 let enemyAxieLastDamageTime = -999;
 let enemyAxieRetreatTimer = 0;
 let enemyAxieIsRetreating = false;
+let enemyAxieRetreatCooldown = 0;
 const ENEMY_AXIE_RETREAT_DURATION = 2.5;
 const ENEMY_AXIE_DAMAGE_MEMORY = 2.0;
 const ENEMY_AXIE_RETREAT_TOWER_RANGE = 6.5;
@@ -245,11 +327,11 @@ const ENEMY_AXIE_RETREAT_TOWER_RANGE = 6.5;
 let playerAILastDamageTime = -999;
 let playerAIRetreatTimer = 0;
 let playerAIIsRetreating = false;
+let playerAIRetreatCooldown = 0;
 const PLAYER_AI_RETREAT_DURATION = 2.5;
 const PLAYER_AI_DAMAGE_MEMORY = 2.0;
 const PLAYER_AI_RETREAT_TOWER_RANGE = 6.5;
 
-// 🧠 APRENDIZAJE
 const factionBrain = {
     ally: { weights: { aggression: 1.0, caution: 1.0, focusPlayer: 1.0, focusMinions: 1.0, focusStructure: 1.0, groupBehavior: 1.0 }, stats: { wavesWon: 0, wavesLost: 0, totalKills: 0, totalDeaths: 0 } },
     enemy: { weights: { aggression: 1.0, caution: 1.0, focusPlayer: 1.0, focusMinions: 1.0, focusStructure: 1.0, groupBehavior: 1.0 }, stats: { wavesWon: 0, wavesLost: 0, totalKills: 0, totalDeaths: 0 } }
@@ -272,6 +354,17 @@ const ENEMY_AXIE_ITEM_CATALOG = {
     baculo: { emoji: '🔮', name: 'Báculo', cost: 45, maxStack: 2, apply: (b) => { b.rangeBonus += 0.5; b.damageMultiplier += 0.05; }, desc: '+0.5 rango, +5% daño' },
     daga: { emoji: '🗡️', name: 'Daga', cost: 35, maxStack: 2, apply: (b) => { b.critChance += 0.15; }, desc: '+15% crítico' }
 };
+
+let enemyAxiePotionCount = 0;
+let enemyAxiePotionCooldown = 0;
+const ENEMY_AXIE_POTION_COOLDOWN = 1.5;
+
+let playerAIPotionCount = 0;
+let playerAIPotionCooldown = 0;
+const PLAYER_AI_POTION_COOLDOWN = 1.5;
+
+const spawnQueue = [];
+let spawnQueueTimer = 0;
 
 function clampWeights(weights) {
     for (const key in weights) {
@@ -330,12 +423,11 @@ window.showBrains = function() {
     console.log('🧠 ALIADA:', factionBrain.ally.weights);
     console.log('🧠 ENEMIGA:', factionBrain.enemy.weights);
     console.log('🤖 AXIE ENEMIGO:', enemyAxieBrain.weights);
-    console.log('💰 Oro jugador:', playerGold, playerItemsOwned);
+    console.log('💰 Oro jugador:', playerGold, playerItemSlots);
     console.log('💰 Jugador-IA:', playerAIGold, playerAIItems);
     console.log('💰 Axie Enemigo:', enemyAxieGold, enemyAxieItems);
 };
 
-// 💰 FUNCIONES DE ORO
 function givePlayerGold(baseAmount, reason = '') {
     if (isAITrainingMode) return;
     const streakBonus = Math.min(playerKillStreak * ECONOMY.STREAK_BONUS_PER_KILL, ECONOMY.STREAK_MAX_BONUS);
@@ -356,7 +448,10 @@ function resetPlayerEconomy() {
     playerGold = ECONOMY.PLAYER_STARTING_GOLD;
     playerKillStreak = 0;
     playerFirstBlood = false;
-    playerItemsOwned = {};
+    playerItemSlots = [null, null, null, null, null, null];
+    potionHPCount = 0;
+    potionMPCount = 0;
+    potionUseCooldown = 0;
     updatePlayerGoldHUD();
 }
 
@@ -398,10 +493,6 @@ function showGoldPopupAt3D(amount, worldPos, color = '#ffcc44') {
     } catch (e) {}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// HEALTH BARS
-// ═══════════════════════════════════════════════════════════════
-
 const healthBarCache = new Map();
 function getHealthBarTexture(segments, visibleSegments, isEnemy) {
     const key = `${segments}-${visibleSegments}-${isEnemy}`;
@@ -436,10 +527,6 @@ function updateHealthBarSprite(spriteMat, segments, visibleSegments, isEnemy) {
     spriteMat.map = getHealthBarTexture(segments, visibleSegments, isEnemy);
     spriteMat.needsUpdate = true;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ESCENA
-// ═══════════════════════════════════════════════════════════════
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a1a);
@@ -580,10 +667,6 @@ const fillLight = new THREE.DirectionalLight(0x4488ff, 0.2);
 fillLight.position.set(-10, 10, -10);
 scene.add(fillLight);
 
-// ═══════════════════════════════════════════════════════════════
-// CARGAR CARRIL
-// ═══════════════════════════════════════════════════════════════
-
 const laneLoader = new GLTFLoader();
 const LANE_PATH = CONFIG.TERRAIN_GLB_LANE;
 const LANE_TARGET_WIDTH = 10;
@@ -673,8 +756,8 @@ function procesarLanes() {
 
     if (!nexusAliado) nexusAliado = new Nexus(2.0, -21, false);
     if (!nexusEnemigo) nexusEnemigo = new Nexus(-1.2, 21, true);
-    if (!shopAliada) shopAliada = new Shop(-2.5, -23, false);
-    if (!shopEnemiga) shopEnemiga = new Shop(2.5, 23, true);
+    if (!shopAliada) shopAliada = new Shop(-2.5, -22, false);
+    if (!shopEnemiga) shopEnemiga = new Shop(2.5, 22, true);
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
@@ -691,10 +774,6 @@ let shopEnemiga = null;
 
 cargarLanePart(0);
 cargarLanePart(1);
-
-// ═══════════════════════════════════════════════════════════════
-// NEXUS
-// ═══════════════════════════════════════════════════════════════
 
 class Nexus {
     constructor(x, z, isEnemy = false) {
@@ -817,13 +896,10 @@ class Nexus {
     die() { this.takeDamage(this.health); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SHOP
-// ═══════════════════════════════════════════════════════════════
-
 let shopUI = null;
 let shopOpen = false;
 let shopActiveTab = 'potions';
+let shopAutoOpenCooldown = 0;
 
 class Shop {
     constructor(x, z, isEnemy = false) {
@@ -951,19 +1027,40 @@ function renderPotions(container) {
         const count = p.id === 'hp' ? potionHPCount : potionMPCount;
         const atMax = count >= p.max;
         const canAfford = playerGold >= p.cost;
-        const item = createShopItem(p.emoji, p.name, p.desc, p.color, `💰 ${p.cost}  ·  Tienes: ${count}/${p.max}`, !atMax && canAfford, atMax ? 'Lleno' : (canAfford ? 'Comprar' : 'Sin oro'), () => buyPotion(p.id));
+        const item = createShopItem(
+            p.emoji, 
+            p.name, 
+            p.desc, 
+            p.color, 
+            `💰 ${p.cost}  ·  Tienes: ${count}/${p.max}`, 
+            !atMax && canAfford, 
+            atMax ? 'Máximo (10)' : (canAfford ? 'Comprar' : 'Sin oro'), 
+            () => buyPotion(p.id)
+        );
         container.appendChild(item);
     });
 }
 
 function renderItems(container) {
     const items = Object.values(PLAYER_SHOP_CATALOG.items);
+    const hasEmptySlot = playerItemSlots.some(s => s === null);
+    const slotsUsed = playerItemSlots.filter(s => s !== null).length;
+    
     items.forEach(itemData => {
-        const owned = playerItemsOwned[itemData.id] || 0;
-        const atMax = owned >= itemData.maxStack;
         const canAfford = playerGold >= itemData.cost;
-        const desc = `${itemData.desc}  (${owned}/${itemData.maxStack})`;
-        const item = createShopItem(itemData.emoji, itemData.name, desc, itemData.color, `💰 ${itemData.cost}`, !atMax && canAfford, atMax ? 'Máximo' : (canAfford ? 'Comprar' : 'Sin oro'), () => buyItem(itemData.id));
+        const canBuy = hasEmptySlot && canAfford;
+        const desc = `${itemData.desc}`;
+        const statusText = !hasEmptySlot ? `Slots: ${slotsUsed}/6` : (canAfford ? 'Comprar' : 'Sin oro');
+        const item = createShopItem(
+            itemData.emoji, 
+            itemData.name, 
+            desc, 
+            itemData.color, 
+            `💰 ${itemData.cost}  ·  Slots: ${slotsUsed}/6`, 
+            canBuy, 
+            statusText, 
+            () => buyItem(itemData.id)
+        );
         container.appendChild(item);
     });
 }
@@ -997,15 +1094,33 @@ function createShopItem(emoji, name, desc, color, priceText, enabled, buttonText
 }
 
 function openShop() {
+    if (shopOpen) return;
     if (!shopUI) createShopUI();
     shopOpen = true;
     shopUI.style.display = 'flex';
     switchTab('potions');
+    gamePaused = true;
+    isMovingToTarget = false;
+    targetPosition = null;
+    isAutoMovingToTarget = false;
+    window.currentTarget = null;
+    if (targetUI) targetUI.style.display = 'none';
+    isMouseDownRight = false;
+    isMouseDownLeft = false;
+    isDragging = false;
+    console.log('🏪 Tienda abierta (juego pausado)');
 }
 
 function closeShop() {
     if (shopUI) shopUI.style.display = 'none';
     shopOpen = false;
+    gamePaused = false;
+    lastTime = performance.now();
+    isMouseDownRight = false;
+    isMouseDownLeft = false;
+    isDragging = false;
+    shopAutoOpenCooldown = CONFIG.SHOP_AUTO_OPEN_COOLDOWN;
+    console.log('🏪 Tienda cerrada (juego reanudado)');
 }
 
 function buyPotion(type) {
@@ -1016,31 +1131,54 @@ function buyPotion(type) {
     if (!spendPlayerGold(potion.cost)) { console.log(`⛔ Sin oro`); return; }
     if (type === 'hp') potionHPCount++;
     else if (type === 'mp') potionMPCount++;
-    console.log(`🛒 ${potion.name} (${potion.cost} oro)`);
+    console.log(`🛒 ${potion.name} (${potion.cost} oro) | Tienes: ${type === 'hp' ? potionHPCount : potionMPCount}/${potion.max}`);
     updatePotionHUD();
     renderShopContent();
+    renderer.render(scene, camera);
 }
 
 function buyItem(itemId) {
     const itemData = PLAYER_SHOP_CATALOG.items[itemId];
     if (!itemData) return;
-    const owned = playerItemsOwned[itemId] || 0;
-    if (owned >= itemData.maxStack) return;
-    if (!spendPlayerGold(itemData.cost)) { console.log(`⛔ Sin oro`); return; }
-    itemData.apply();
-    playerItemsOwned[itemId] = owned + 1;
-    console.log(`🛒 ${itemData.name} (stack ${owned + 1}/${itemData.maxStack})`);
-    const slotIndex = Object.keys(playerItemsOwned).indexOf(itemId);
-    if (slotIndex >= 0 && slotIndex < itemSlots.length) {
-        const slot = itemSlots[slotIndex];
-        slot.dataset.itemName = itemId;
-        slot.textContent = itemData.emoji;
-        slot.style.fontSize = '20px';
-        slot.style.color = itemData.color;
-        slot.style.background = `${itemData.color}22`;
-        slot.style.borderColor = itemData.color;
+    
+    const emptySlotIndex = playerItemSlots.findIndex(s => s === null);
+    if (emptySlotIndex === -1) {
+        console.log('⛔ Inventario lleno (6/6 items)');
+        return;
     }
+    
+    if (!spendPlayerGold(itemData.cost)) { console.log(`⛔ Sin oro`); return; }
+    
+    itemData.apply();
+    playerItemSlots[emptySlotIndex] = { id: itemId, emoji: itemData.emoji, name: itemData.name, color: itemData.color };
+    
+    console.log(`🛒 ${itemData.name} comprado → slot ${emptySlotIndex + 1}/6`);
+    
+    updateItemHUD();
     renderShopContent();
+    renderer.render(scene, camera);
+}
+
+function updateItemHUD() {
+    for (let i = 0; i < itemSlots.length; i++) {
+        const slot = itemSlots[i];
+        const item = playerItemSlots[i];
+        if (item) {
+            slot.textContent = item.emoji;
+            slot.style.fontSize = '18px';
+            slot.style.background = `${item.color}22`;
+            slot.style.borderColor = item.color;
+            slot.title = item.name;
+            slot.dataset.itemName = item.id;
+        } else {
+            slot.textContent = '';
+            slot.style.fontSize = '13px';
+            slot.style.background = 'rgba(255,255,255,0.05)';
+            slot.style.borderColor = 'rgba(255,255,255,0.15)';
+            slot.title = '';
+            delete slot.dataset.itemName;
+        }
+    }
 }
 
 function getShopFromClick(event) {
@@ -1061,10 +1199,6 @@ function getShopFromClick(event) {
     }
     return null;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// PROYECTILES
-// ═══════════════════════════════════════════════════════════════
 
 class TowerProjectile {
     constructor(startPos, target, isEnemy = false, damage = 20) {
@@ -1221,10 +1355,6 @@ class PlayerProjectile {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TOWERS
-// ═══════════════════════════════════════════════════════════════
-
 class AxieTower {
     constructor(x, z, isEnemy = false, tier = 1) {
         this.isEnemy = isEnemy;
@@ -1318,7 +1448,7 @@ class AxieTower {
             const dist = this.position.distanceTo(enemy.group.position);
             if (dist < closestDist && dist <= this.range) { closestDist = dist; closestEnemy = enemy; }
         }
-        if (this.isEnemy && !closestEnemy && playerModel && !isPlayerDead) {
+        if (this.isEnemy && !closestEnemy && playerModel && !isPlayerDead && playerSpawned) {
             const dist = this.position.distanceTo(playerModel.position);
             if (dist <= this.range) { closestEnemy = { group: playerModel, isDead: false, type: 'player' }; closestDist = dist; }
         }
@@ -1354,10 +1484,6 @@ function createTower(x, z, isEnemy = false, tier = 1) {
     return tower;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// HUDs
-// ═══════════════════════════════════════════════════════════════
-
 const timerDiv = document.createElement('div');
 timerDiv.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);color:#44ff88;font-family:monospace;font-size:28px;font-weight:bold;background:rgba(0,0,0,0.8);padding:8px 24px;border-radius:12px;z-index:100;pointer-events:none;border:2px solid rgba(68,255,136,0.3);display:none;`;
 timerDiv.textContent = '00:00';
@@ -1384,7 +1510,7 @@ enemyAxieDebugHUD.style.cssText = `position:fixed;top:120px;right:20px;color:#ff
 document.body.appendChild(enemyAxieDebugHUD);
 
 function updateEnemyAxieDebugHUD() {
-    if (!enemyAxieSpawned || gameFinished || gamePaused || !isAITrainingMode) {
+    if (!enemyAxieSpawned || gameFinished || !isAITrainingMode) {
         enemyAxieDebugHUD.style.display = 'none';
         return;
     }
@@ -1397,17 +1523,15 @@ function updateEnemyAxieDebugHUD() {
         <div style="color:#ff6644;font-weight:bold;margin-bottom:4px;">🤖 IA vs IA</div>
         <div style="color:#88ddff;">🦊 Jugador-IA</div>
         <div>  💰 ${playerAIGold} | ❤️ ${hpPctP}%</div>
+        <div>  🧪 Pociones: ${playerAIPotionCount}/${CONFIG.AXIE_MAX_POTIONS}</div>
         <div>  🛒 ${itemsP}</div>
         <div style="color:#ff4444;margin-top:4px;">🤖 Axie Enemigo</div>
         <div>  💰 ${enemyAxieGold} | ❤️ ${hpPctE}%</div>
+        <div>  🧪 Pociones: ${enemyAxiePotionCount}/${CONFIG.AXIE_MAX_POTIONS}</div>
         <div>  🛒 ${itemsE}</div>
         <div style="color:#aaa;margin-top:4px;font-size:10px;">Cámara: ${dynamicCameraMode}</div>
     `;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// HUD DINÁMICO (para modo IA vs IA)
-// ═══════════════════════════════════════════════════════════════
 
 function updateDynamicHUDForCamera() {
     if (!isAITrainingMode) return;
@@ -1416,12 +1540,13 @@ function updateDynamicHUDForCamera() {
     const nameEl = playerHUD.querySelector('div[style*="font-weight:bold"]');
     const healthBar = document.getElementById('player-hud-health-bar');
     const healthText = document.getElementById('player-hud-health-text');
-    const potionHPEl = potionHUD ? potionHUD.children[0] : null;
-    const potionMPEl = potionHUD ? potionHUD.children[1] : null;
+    const manaBar = document.getElementById('player-hud-mana-bar');
+    const manaText = document.getElementById('player-hud-mana-text');
+    const potionHPEl = document.getElementById('potion-hp-count');
+    const potionMPEl = document.getElementById('potion-mp-count');
 
     const mode = dynamicCameraMode;
 
-    // Limpiar slots
     itemSlots.forEach((slot) => {
         slot.textContent = '';
         slot.style.background = 'rgba(255,255,255,0.05)';
@@ -1431,45 +1556,41 @@ function updateDynamicHUDForCamera() {
     });
 
     if (mode === 'player') {
-        if (nameEl) {
-            nameEl.textContent = `🦊 ${currentAxieName} (IA)`;
-            nameEl.style.color = '#44ff88';
-        }
+        if (nameEl) { nameEl.textContent = `🦊 ${currentAxieName} (IA)`; nameEl.style.color = '#44ff88'; }
         if (healthBar) {
             const pct = Math.max(0, (playerHealth / playerMaxHealth) * 100);
             healthBar.style.width = `${pct}%`;
-            healthBar.style.background = 'linear-gradient(90deg,#4488ff,#66aaff)';
+            healthBar.style.background = 'linear-gradient(90deg,#ff2244,#ff6644)';
         }
         if (healthText) healthText.textContent = `${Math.floor(playerHealth)}/${playerMaxHealth}`;
-        if (potionHPEl) potionHPEl.textContent = `HP (${potionHPCount})`;
-        if (potionMPEl) potionMPEl.textContent = `MP (${potionMPCount})`;
+        if (manaBar) manaBar.style.width = `${Math.max(0, (playerMana / playerMaxMana) * 100)}%`;
+        if (manaText) manaText.textContent = `${Math.floor(playerMana)}/${playerMaxMana}`;
+        if (potionHPEl) potionHPEl.textContent = `${potionHPCount}`;
+        if (potionMPEl) potionMPEl.textContent = `${potionMPCount}`;
 
-        let slotIdx = 0;
-        for (const [itemId, count] of Object.entries(playerAIItems)) {
-            if (slotIdx >= itemSlots.length) break;
-            const item = ENEMY_AXIE_ITEM_CATALOG[itemId];
+        for (let i = 0; i < itemSlots.length && i < 6; i++) {
+            const item = playerItemSlots[i];
             if (!item) continue;
-            const slot = itemSlots[slotIdx];
-            slot.textContent = count > 1 ? `${item.emoji}${count}` : item.emoji;
-            slot.style.fontSize = '16px';
-            slot.style.background = 'rgba(68,255,136,0.15)';
-            slot.style.borderColor = '#44ff88';
-            slot.dataset.itemName = itemId;
-            slotIdx++;
+            const slot = itemSlots[i];
+            slot.textContent = item.emoji;
+            slot.style.fontSize = '18px';
+            slot.style.background = `${item.color}22`;
+            slot.style.borderColor = item.color;
+            slot.title = item.name;
+            slot.dataset.itemName = item.id;
         }
     } else if (mode === 'enemy') {
-        if (nameEl) {
-            nameEl.textContent = `🤖 ${enemyAxie ? enemyAxie.nombre : 'Axie'} (IA)`;
-            nameEl.style.color = '#ff6644';
-        }
+        if (nameEl) { nameEl.textContent = `🤖 ${enemyAxie ? enemyAxie.nombre : 'Axie'} (IA)`; nameEl.style.color = '#ff6644'; }
         if (healthBar) {
             const pct = enemyAxie ? Math.max(0, (enemyAxie.health / enemyAxieMaxHealth) * 100) : 0;
             healthBar.style.width = `${pct}%`;
             healthBar.style.background = 'linear-gradient(90deg,#ff2244,#ff6644)';
         }
         if (healthText) healthText.textContent = enemyAxie ? `${Math.floor(enemyAxie.health)}/${enemyAxieMaxHealth}` : '0/200';
-        if (potionHPEl) potionHPEl.textContent = `HP (${potionHPCount})`;
-        if (potionMPEl) potionMPEl.textContent = `MP (${potionMPCount})`;
+        if (manaBar) manaBar.style.width = '100%';
+        if (manaText) manaText.textContent = `${enemyAxieMaxHealth}/${enemyAxieMaxHealth}`;
+        if (potionHPEl) potionHPEl.textContent = `${enemyAxiePotionCount}`;
+        if (potionMPEl) potionMPEl.textContent = `0`;
 
         let slotIdx = 0;
         for (const [itemId, count] of Object.entries(enemyAxieItems)) {
@@ -1486,10 +1607,6 @@ function updateDynamicHUDForCamera() {
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// MINION
-// ═══════════════════════════════════════════════════════════════
 
 class Minion {
     constructor(x, z, isEnemy = false, tipo = 'melee', formationIndex = 0) {
@@ -1522,6 +1639,21 @@ class Minion {
         };
         this.mixer = null;
         this.glbModel = null;
+
+        this.combatOffsetX = 0;
+        this.combatOffsetZ = 0;
+        if (tipo === 'melee') {
+            const meleeSlots = [0, -1.0, 1.0, -2.0, 2.0];
+            this.combatOffsetX = meleeSlots[formationIndex % meleeSlots.length] || 0;
+            this.combatOffsetZ = 0;
+        } else {
+            const mageSlots = [0, -1.2, 1.2];
+            this.combatOffsetX = mageSlots[(formationIndex - 5) % mageSlots.length] || 0;
+            this.combatOffsetZ = isEnemy ? -2.5 : 2.5;
+        }
+        this.mySlotX = this.combatOffsetX;
+        this.formationSet = false;
+        this.deployProgress = 0;
 
         this.group = new THREE.Group();
         this.group.userData.targetRef = this;
@@ -1623,16 +1755,28 @@ class Minion {
 
     adjustWeightsOnKill(targetType) {
         const w = this.memory.weights;
-        if (targetType === 'player') { w.aggression += 0.15; w.focusPlayer += 0.2; }
+        if (targetType === 'player') { 
+            w.aggression += 0.2; 
+            w.focusPlayer += 0.25; 
+        }
         else if (targetType === 'minion') {
-            w.focusMinions += 0.1;
-            if (this.memory.kills >= 3) { w.focusStructure += 0.12; w.focusMinions -= 0.05; }
-        } else if (targetType === 'tower' || targetType === 'nexus') { w.focusStructure += 0.2; w.focusMinions -= 0.05; }
+            w.focusMinions += 0.12;
+            if (this.memory.kills >= 3) { 
+                w.focusStructure += 0.15; 
+                w.focusMinions -= 0.05; 
+            }
+        } 
+        else if (targetType === 'tower' || targetType === 'nexus') { 
+            w.focusStructure += 0.25; 
+            w.aggression += 0.1;
+            w.focusMinions -= 0.08; 
+        }
         clampWeights(w);
     }
 
     adjustWeightsOnDeath(killedBy) {
         const w = this.memory.weights;
+        w.caution += 0.15;
         if (killedBy === 'player') { w.focusPlayer -= 0.2; w.caution += 0.15; }
         else if (killedBy === 'tower') { w.caution += 0.25; w.focusStructure -= 0.2; }
         else if (killedBy === 'minion') { w.focusMinions -= 0.15; w.groupBehavior += 0.2; }
@@ -1659,80 +1803,181 @@ class Minion {
             let nz = this.group.position.z + this.direction * this.speed * delta;
             nz = Math.max(-CONFIG.minionLimitZ, Math.min(CONFIG.minionLimitZ, nz));
             this.group.position.z = nz;
-            this.group.position.x += (0 - this.group.position.x) * Math.min(1, 3 * delta);
             this.state = 'move';
+            clampMinionToLane(this);
+            this.updateHealthBar();
             return;
         }
 
         this.attackCooldown -= delta;
 
+        const w = this.memory.weights;
         const enemyMinions = this.isEnemy ? aliados : enemigos;
+        const enemyAxie = this.isEnemy ? playerModel : enemyAxieModel;
+        const enemyAxieIsDeadFlag = this.isEnemy ? isPlayerDead : enemyAxieIsDead;
+        const myAllies = this.isEnemy ? enemigos : aliados;
 
-        // Buscar enemigo más cercano al frente (mismo carril)
-        let closestEnemy = null;
-        let closestDist = Infinity;
-        for (const em of enemyMinions) {
-            if (em.isDead) continue;
-            const dx = Math.abs(em.group.position.x - this.group.position.x);
-            if (dx > 2.5) continue;
-            const dz = em.group.position.z - this.group.position.z;
-            const isAhead = this.isEnemy ? dz < 0 : dz > 0;
-            const absDz = Math.abs(dz);
-            if (isAhead || absDz < 3.0) {
-                if (absDz < closestDist) {
-                    closestDist = absDz;
-                    closestEnemy = em;
+        const AGGRO_RANGE = CONFIG.MINION_AGGRO_RANGE;
+        const AGGRO_RANGE_EXTENDED = CONFIG.MINION_AGGRO_RANGE_EXTENDED;
+
+        const enemiesAttackingAllies = new Set();
+        for (const ally of myAllies) {
+            if (ally.isDead) continue;
+            if (ally.target && !ally.target.isDead) {
+                const attacker = ally.target;
+                if (attacker.group) {
+                    enemiesAttackingAllies.add(attacker);
                 }
             }
         }
 
-        // Considerar Axie enemigo
-        const enemyAxie = this.isEnemy ? playerModel : enemyAxieModel;
-        const enemyAxieIsDeadFlag = this.isEnemy ? isPlayerDead : enemyAxieIsDead;
-        if (enemyAxie && !enemyAxieIsDeadFlag && !closestEnemy) {
-            const dx = Math.abs(enemyAxie.position.x - this.group.position.x);
-            const dz = Math.abs(enemyAxie.position.z - this.group.position.z);
-            if (dx < 3.0 && dz < 4.0) {
-                closestEnemy = { group: enemyAxie, isDead: false, type: this.isEnemy ? 'player' : 'enemy_axie', health: 999999, _isAxie: true };
-                closestDist = dz;
+        const enemyTowers = this.isEnemy
+            ? towers.filter(t => !t.isDead && !t.isEnemy)
+            : towers.filter(t => !t.isDead && t.isEnemy);
+
+        let priority1Target = null;
+        let priority1Dist = Infinity;
+        for (const em of enemyMinions) {
+            if (em.isDead) continue;
+            if (!enemiesAttackingAllies.has(em)) continue;
+            const dist = this.group.position.distanceTo(em.group.position);
+            if (dist < AGGRO_RANGE_EXTENDED && dist < priority1Dist) {
+                priority1Dist = dist;
+                priority1Target = em;
             }
         }
 
-        if (closestEnemy) {
-            this.target = closestEnemy;
-            this.state = 'attack';
+        let priority2Target = null;
+        let priority2Dist = Infinity;
+        if (!priority1Target) {
+            for (const em of enemyMinions) {
+                if (em.isDead) continue;
+                const dx = Math.abs(em.group.position.x - this.group.position.x);
+                if (dx > 4.0) continue;
+                const dist = this.group.position.distanceTo(em.group.position);
+                if (dist > AGGRO_RANGE) continue;
+                const dz = em.group.position.z - this.group.position.z;
+                const isAhead = this.isEnemy ? dz < 0 : dz > 0;
+                if (!isAhead && Math.abs(dz) > 3.0) continue;
+                if (dist < priority2Dist) {
+                    priority2Dist = dist;
+                    priority2Target = em;
+                }
+            }
+        }
 
-            const dx = closestEnemy.group.position.x - this.group.position.x;
-            const dz = closestEnemy.group.position.z - this.group.position.z;
+        let priority3Target = null;
+        let priority3Dist = Infinity;
+        if (!priority1Target && !priority2Target) {
+            for (const tower of enemyTowers) {
+                const dist = this.group.position.distanceTo(tower.position);
+                if (dist > CONFIG.MINION_TOWER_ATTACK_RANGE) continue;
+                const isAhead = this.isEnemy ? tower.position.z < this.group.position.z : tower.position.z > this.group.position.z;
+                if (!isAhead && dist > 8) continue;
+                let score = dist;
+                if (isAhead) score -= 30;
+                const tHP = tower.health / tower.maxHealth;
+                if (tHP < 0.5) score -= 10;
+                if (tHP < 0.3) score -= 20;
+                if (score < priority3Dist) {
+                    priority3Dist = score;
+                    priority3Target = tower;
+                }
+            }
+        }
+
+        let priority4Target = null;
+        if (!priority1Target && !priority2Target && !priority3Target && enemyAxie && !enemyAxieIsDeadFlag) {
+            const axieDx = Math.abs(enemyAxie.position.x - this.group.position.x);
+            const axieDist = this.group.position.distanceTo(enemyAxie.position);
+            if (axieDist < CONFIG.MINION_AGGRO_TO_AXIE && axieDx < 3.5) {
+                priority4Target = {
+                    group: enemyAxie,
+                    isDead: false,
+                    type: this.isEnemy ? 'player' : 'enemy_axie',
+                    health: 999999,
+                    _isAxie: true
+                };
+            }
+        }
+
+        let priority5Target = null;
+        if (!priority1Target && !priority2Target && !priority3Target && !priority4Target) {
+            const hasLivingTowers = enemyTowers.length > 0;
+            if (!hasLivingTowers) {
+                const enemyNexus = this.isEnemy ? nexusAliado : nexusEnemigo;
+                if (enemyNexus && !enemyNexus.isDead) {
+                    const dist = this.group.position.distanceTo(enemyNexus.position);
+                    if (dist < 40) priority5Target = enemyNexus;
+                }
+            }
+        }
+
+        const finalTarget = priority1Target || priority2Target || priority3Target || priority4Target || priority5Target;
+
+        const DEPLOY_TRIGGER_DIST = CONFIG.DEPLOY_TRIGGER_DIST;
+
+        if (finalTarget) {
+            this.target = finalTarget;
+            const targetPos = finalTarget.group ? finalTarget.group.position : finalTarget.position;
+            const dx = targetPos.x - this.group.position.x;
+            const dz = targetPos.z - this.group.position.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
 
             this.group.rotation.y = Math.atan2(dx, dz);
 
-            if (dist <= this.attackRange) {
+            let attackRange = this.attackRange;
+            if (finalTarget.type === 'tower' || finalTarget.type === 'nexus') attackRange += 0.5;
+
+            const distToAttack = Math.max(0, dist - attackRange);
+            const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
+            this.deployProgress += (deployTarget - this.deployProgress) * Math.min(1, 2.5 * delta);
+            if (this.deployProgress < 0.01) this.deployProgress = 0;
+            if (this.deployProgress > 0.99) this.deployProgress = 1;
+
+            if (dist <= attackRange) {
+                this.state = 'attack';
                 if (this.attackCooldown <= 0) {
-                    registerFactionAttack(this.isEnemy ? 'enemy' : 'ally', closestEnemy);
+                    registerFactionAttack(this.isEnemy ? 'enemy' : 'ally', finalTarget);
                     
-                    if (closestEnemy._isAxie || closestEnemy.type === 'player' || closestEnemy.type === 'enemy_axie') {
+                    if (finalTarget._isAxie || finalTarget.type === 'player' || finalTarget.type === 'enemy_axie') {
+                        if (finalTarget.type === 'player') {
+                            playerTakeDamage(this.attackDamage);
+                        } else if (finalTarget.type === 'enemy_axie' && typeof enemyAxieTakeDamage === 'function') {
+                            enemyAxieTakeDamage(this.attackDamage);
+                        }
+                        this.attackCooldown = this.attackSpeed;
+                    } else if (finalTarget.type === 'tower' || finalTarget.type === 'nexus') {
+                        if (finalTarget.takeDamage) finalTarget.takeDamage(this.attackDamage);
                         this.attackCooldown = this.attackSpeed;
                     } else {
-                        closestEnemy.health -= this.attackDamage;
+                        finalTarget.health -= this.attackDamage;
                         this.attackCooldown = this.attackSpeed;
-                        if (closestEnemy.updateHealthBar) closestEnemy.updateHealthBar();
-                        if (closestEnemy.health <= 0) {
+                        if (finalTarget.updateHealthBar) finalTarget.updateHealthBar();
+                        if (finalTarget.health <= 0) {
                             this.memory.kills++;
-                            this.adjustWeightsOnKill(closestEnemy.type || 'minion');
+                            this.adjustWeightsOnKill(finalTarget.type || 'minion');
                             factionBrain[this.isEnemy ? 'enemy' : 'ally'].stats.totalKills++;
-                            if (closestEnemy.die) closestEnemy.die('minion');
+                            if (finalTarget.die) finalTarget.die('minion');
                             this.target = null;
                             this.state = 'move';
                         }
                     }
                 }
+                const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
+                const smoothFactor = 2.0 * this.deployProgress;
+                this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, smoothFactor * delta);
             } else {
                 this.state = 'move';
                 const norm = dist > 0.1 ? dist : 1;
+                
                 this.group.position.z += (dz / norm) * this.speed * delta;
-                this.group.position.x += (0 - this.group.position.x) * Math.min(1, 4 * delta);
+                this.group.position.x += (dx / norm) * this.speed * delta;
+                
+                if (this.deployProgress > 0.01) {
+                    const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
+                    this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, 1.5 * this.deployProgress * delta);
+                }
             }
         } else {
             this.target = null;
@@ -1740,10 +1985,12 @@ class Minion {
             let nz = this.group.position.z + this.direction * this.speed * delta;
             nz = Math.max(-CONFIG.minionLimitZ, Math.min(CONFIG.minionLimitZ, nz));
             this.group.position.z = nz;
-            this.group.position.x += (0 - this.group.position.x) * Math.min(1, 4 * delta);
+            this.group.position.x += (0 - this.group.position.x) * Math.min(1, 2 * delta);
             this.group.rotation.y = this.isEnemy ? Math.PI : 0;
+            this.deployProgress += (0 - this.deployProgress) * Math.min(1, 2 * delta);
         }
 
+        clampMinionToLane(this);
         this.updateHealthBar();
     }
 
@@ -1802,7 +2049,6 @@ function evaluateWaveOutcome() {
     }
 }
 
-// 🎯 SPAWN EN FILA (todos al centro, magos detrás)
 function spawnWave() {
     if (gameFinished) return;
     if (waveNumber > 1) evaluateWaveOutcome();
@@ -1817,44 +2063,68 @@ function spawnWave() {
     const comp = getWaveComposition();
     waveDiv.textContent = `⚔️ OLEADA ${waveNumber}`;
 
-    const CENTER_X = 0;
-    const startZ = -18;
-    const ROW_SPACING = 1.8;
+    const startZ = -13;
+    const ROW_SPACING = 1.2;
+    const mageSpacingSpawn = 1.0;
 
-    const positions = [];
+    let queueIndex = 0;
 
-    // Melee adelante
     for (let i = 0; i < comp.melee; i++) {
         const z = startZ - i * ROW_SPACING;
-        positions.push({ x: CENTER_X, z, tipo: 'melee', index: i });
-        aliados.push(new Minion(CENTER_X, z, false, 'melee', i));
+        spawnQueue.push({ team: 'ally', tipo: 'melee', index: i, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
+        queueIndex++;
     }
 
-    // Magos detrás
-    const mageStartZ = startZ - comp.melee * ROW_SPACING;
+    const mageStartZ = startZ - comp.melee * ROW_SPACING - 1.0;
     for (let i = 0; i < comp.mage; i++) {
-        const z = mageStartZ - i * ROW_SPACING;
-        positions.push({ x: CENTER_X, z, tipo: 'mage', index: i + comp.melee });
-        aliados.push(new Minion(CENTER_X, z, false, 'mage', i + comp.melee));
+        let z = mageStartZ - i * mageSpacingSpawn;
+        z = Math.max(-CONFIG.MINION_LANE_LIMIT_Z + 0.5, Math.min(CONFIG.MINION_LANE_LIMIT_Z - 0.5, z));
+        spawnQueue.push({ team: 'ally', tipo: 'mage', index: i + comp.melee, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
+        queueIndex++;
     }
 
-    for (const p of positions) {
-        enemigos.push(new Minion(-p.x, -p.z, true, p.tipo, p.index));
+    for (let i = 0; i < comp.melee; i++) {
+        const z = -(startZ - i * ROW_SPACING);
+        spawnQueue.push({ team: 'enemy', tipo: 'melee', index: i, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
+        queueIndex++;
     }
+
+    for (let i = 0; i < comp.mage; i++) {
+        let z = -(mageStartZ - i * mageSpacingSpawn);
+        z = Math.max(-CONFIG.MINION_LANE_LIMIT_Z + 0.5, Math.min(CONFIG.MINION_LANE_LIMIT_Z - 0.5, z));
+        spawnQueue.push({ team: 'enemy', tipo: 'mage', index: i + comp.melee, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
+        queueIndex++;
+    }
+
+    console.log(`🌊 [t=${gameTime.toFixed(2)}s] Oleada ${waveNumber}: ${comp.melee} melee + ${comp.mage} mage por equipo (spawn 1s escalonado)`);
 
     waveNumber++;
     waveCooldown = 0;
-
-    if (waveNumber === 2) {
-        isFirstWave = true;
-        for (const m of aliados) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
-        for (const m of enemigos) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
-    }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// PLAYER MODEL Y HUD
-// ═══════════════════════════════════════════════════════════════
+function processSpawnQueue(delta) {
+    if (spawnQueue.length === 0) return;
+    spawnQueueTimer += delta;
+    for (let i = spawnQueue.length - 1; i >= 0; i--) {
+        const item = spawnQueue[i];
+        if (spawnQueueTimer >= item.delay) {
+            if (item.team === 'ally') {
+                const m = new Minion(0, item.z, false, item.tipo, item.index);
+                clampMinionToLane(m);
+                if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
+                aliados.push(m);
+            } else {
+                const m = new Minion(0, item.z, true, item.tipo, item.index);
+                clampMinionToLane(m);
+                if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
+                enemigos.push(m);
+            }
+            console.log(`👾 [t=${gameTime.toFixed(2)}s] Spawn: ${item.team} ${item.tipo} #${item.index + 1}`);
+            spawnQueue.splice(i, 1);
+        }
+    }
+    if (spawnQueue.length === 0) spawnQueueTimer = 0;
+}
 
 let playerModel = null;
 let mixer = null;
@@ -1888,7 +2158,7 @@ function getGroundIntersection(event) {
     const intersectPoint = raycaster.ray.intersectPlane(plane, ip);
     if (intersectPoint) {
         intersectPoint.x = Math.max(-17, Math.min(17, intersectPoint.x));
-        intersectPoint.z = Math.max(-27, Math.min(27, intersectPoint.z));
+        intersectPoint.z = Math.max(-26, Math.min(26, intersectPoint.z));
         intersectPoint.y = GROUND_Y;
         return intersectPoint;
     }
@@ -1902,7 +2172,10 @@ function loadSelectedAxie(axieId) {
         const axieData = getAxieById(axieId);
         if (!axieData) { loadDefaultAxie().then(resolve); return; }
         const loader = new GLTFLoader();
-        loader.load(axieData.modelo, (gltf) => {
+        // 🔧 FIX: resolver ruta con función auxiliar
+        const modelPath = getAxieModelPath(axieData);
+        console.log(`🦊 Cargando Axie: ${axieData.nombre} desde ${modelPath}`);
+        loader.load(modelPath, (gltf) => {
             if (playerModel) { scene.remove(playerModel); if (mixer) { mixer.stopAllAction(); mixer = null; } }
             playerModel = gltf.scene;
             const escala = axieData.escala || 1.2;
@@ -1923,14 +2196,20 @@ function loadSelectedAxie(axieId) {
             axieLoaded = true;
             currentAxieName = axieData.nombre;
             resolve();
-        }, undefined, () => { loadDefaultAxie().then(resolve); });
+        }, undefined, (err) => {
+            console.error(`❌ Error cargando ${modelPath}:`, err);
+            loadDefaultAxie().then(resolve);
+        });
     });
 }
 
 function loadDefaultAxie() {
     return new Promise((resolve) => {
         const loader = new GLTFLoader();
-        loader.load('/axie-3d-assets/assets/mascots/bing.glb', (gltf) => {
+        // 🔧 FIX: ruta nueva de Axies
+        const defaultPath = CONFIG.AXIES_BASE_PATH + 'bing.glb';
+        console.log(`🦊 Cargando Axie por defecto: ${defaultPath}`);
+        loader.load(defaultPath, (gltf) => {
             if (playerModel) { scene.remove(playerModel); if (mixer) { mixer.stopAllAction(); mixer = null; } }
             playerModel = gltf.scene;
             playerModel.scale.set(1.2, 1.2, 1.2);
@@ -1949,7 +2228,9 @@ function loadDefaultAxie() {
             axieLoaded = true;
             currentAxieName = 'Bing';
             resolve();
-        }, undefined, () => {
+        }, undefined, (err) => {
+            console.error(`❌ Error cargando Axie por defecto (${defaultPath}):`, err);
+            console.warn('⚠️ Usando cubo rojo como fallback');
             const fb = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 1), new THREE.MeshStandardMaterial({ color: 0xff4444 }));
             fb.position.copy(playerSpawnPosition);
             fb.position.y = GROUND_Y;
@@ -1968,8 +2249,6 @@ let hudWrapper = null;
 let potionHUD = null;
 let itemHUD = null;
 let itemSlots = [];
-let potionHPCount = 5;
-let potionMPCount = 5;
 
 function createPlayerHUD() {
     if (playerHUD) playerHUD.remove();
@@ -1977,6 +2256,7 @@ function createPlayerHUD() {
     hudWrapper = document.createElement('div');
     hudWrapper.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;align-items:stretch;gap:10px;z-index:1000;pointer-events:none;`;
     document.body.appendChild(hudWrapper);
+
     playerHUD = document.createElement('div');
     playerHUD.style.cssText = `width:400px;background:rgba(0,0,0,0.9);border:2px solid rgba(255,255,255,0.3);border-radius:12px;padding:15px;color:#fff;box-sizing:border-box;`;
     playerHUD.innerHTML = `
@@ -1984,12 +2264,19 @@ function createPlayerHUD() {
             <div style="font-size:20px;">⚔️</div>
             <div style="font-weight:bold;font-size:18px;color:#44ff88;">${currentAxieName}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
             <span style="color:#ff6644;">❤️</span>
             <div style="flex:1;height:18px;background:rgba(255,255,255,0.15);border-radius:4px;overflow:hidden;">
-                <div id="player-hud-health-bar" style="width:100%;height:100%;background:linear-gradient(90deg,#4488ff,#66aaff);"></div>
+                <div id="player-hud-health-bar" style="width:100%;height:100%;background:linear-gradient(90deg,#ff2244,#ff6644);"></div>
             </div>
             <span id="player-hud-health-text" style="font-size:14px;font-weight:bold;">200/200</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#44aaff;">💧</span>
+            <div style="flex:1;height:18px;background:rgba(255,255,255,0.15);border-radius:4px;overflow:hidden;">
+                <div id="player-hud-mana-bar" style="width:100%;height:100%;background:linear-gradient(90deg,#2266ff,#44aaff);"></div>
+            </div>
+            <span id="player-hud-mana-text" style="font-size:14px;font-weight:bold;">200/200</span>
         </div>
     `;
     hudWrapper.appendChild(playerHUD);
@@ -2003,11 +2290,38 @@ function createPlayerHUD() {
 function createPotionHUD(h) {
     if (potionHUD) potionHUD.remove();
     potionHUD = document.createElement('div');
-    potionHUD.style.cssText = `width:50px;height:${h}px;background:rgba(0,0,0,0.9);border:2px solid rgba(255,255,255,0.3);border-radius:12px;display:flex;flex-direction:column;gap:3px;padding:5px;box-sizing:border-box;`;
-    potionHUD.innerHTML = `
-        <div style="flex:1;background:rgba(255,68,68,0.1);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#ff6644;font-weight:bold;">HP (${potionHPCount})</div>
-        <div style="flex:1;background:rgba(68,170,255,0.1);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#44aaff;font-weight:bold;">MP (${potionMPCount})</div>
+    potionHUD.style.cssText = `width:70px;height:${h}px;background:rgba(0,0,0,0.9);border:2px solid rgba(255,255,255,0.3);border-radius:12px;display:flex;flex-direction:column;gap:4px;padding:6px;box-sizing:border-box;pointer-events:auto;`;
+    
+    const hpBox = document.createElement('div');
+    hpBox.id = 'potion-hp-box';
+    hpBox.style.cssText = `
+        flex:1;background:rgba(255,68,68,0.15);border:2px solid rgba(255,68,68,0.4);
+        border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        font-size:11px;color:#ff6644;font-weight:bold;cursor:pointer;user-select:none;
+        transition:all 0.15s;position:relative;
     `;
+    hpBox.innerHTML = `<div style="font-size:16px;">🧪</div><div id="potion-hp-count" style="font-size:11px;">0</div>`;
+    hpBox.onclick = () => usePotion('hp');
+    hpBox.onmouseenter = () => { hpBox.style.background = 'rgba(255,68,68,0.35)'; hpBox.style.transform = 'scale(1.05)'; };
+    hpBox.onmouseleave = () => { hpBox.style.background = 'rgba(255,68,68,0.15)'; hpBox.style.transform = 'scale(1)'; };
+    hpBox.title = 'Click para usar Poción HP (+50)';
+    potionHUD.appendChild(hpBox);
+    
+    const mpBox = document.createElement('div');
+    mpBox.id = 'potion-mp-box';
+    mpBox.style.cssText = `
+        flex:1;background:rgba(68,170,255,0.15);border:2px solid rgba(68,170,255,0.4);
+        border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        font-size:11px;color:#44aaff;font-weight:bold;cursor:pointer;user-select:none;
+        transition:all 0.15s;position:relative;
+    `;
+    mpBox.innerHTML = `<div style="font-size:16px;">💧</div><div id="potion-mp-count" style="font-size:11px;">0</div>`;
+    mpBox.onclick = () => usePotion('mp');
+    mpBox.onmouseenter = () => { mpBox.style.background = 'rgba(68,170,255,0.35)'; mpBox.style.transform = 'scale(1.05)'; };
+    mpBox.onmouseleave = () => { mpBox.style.background = 'rgba(68,170,255,0.15)'; mpBox.style.transform = 'scale(1)'; };
+    mpBox.title = 'Click para usar Poción MP (+50)';
+    potionHUD.appendChild(mpBox);
+    
     hudWrapper.appendChild(potionHUD);
 }
 
@@ -2036,19 +2350,74 @@ function createItemHUD(h) {
 function updatePlayerHUD() {
     if (!playerHUD) return;
     if (isAITrainingMode) { updateDynamicHUDForCamera(); return; }
-    const pct = Math.max(0, (playerHealth / playerMaxHealth) * 100);
-    const bar = document.getElementById('player-hud-health-bar');
-    const text = document.getElementById('player-hud-health-text');
-    if (bar) bar.style.width = `${pct}%`;
-    if (text) text.textContent = `${Math.floor(playerHealth)}/${playerMaxHealth}`;
+
+    const hpPct = Math.max(0, (playerHealth / playerMaxHealth) * 100);
+    const mpPct = Math.max(0, (playerMana / playerMaxMana) * 100);
+
+    const hpBar = document.getElementById('player-hud-health-bar');
+    const hpText = document.getElementById('player-hud-health-text');
+    const mpBar = document.getElementById('player-hud-mana-bar');
+    const mpText = document.getElementById('player-hud-mana-text');
+
+    if (hpBar) hpBar.style.width = `${hpPct}%`;
+    if (hpText) hpText.textContent = `${Math.floor(playerHealth)}/${playerMaxHealth}`;
+    if (mpBar) mpBar.style.width = `${mpPct}%`;
+    if (mpText) mpText.textContent = `${Math.floor(playerMana)}/${playerMaxMana}`;
 }
 
 function updatePotionHUD() {
-    if (!potionHUD) return;
-    const hpBox = potionHUD.children[0];
-    const mpBox = potionHUD.children[1];
-    if (hpBox) hpBox.textContent = `HP (${potionHPCount})`;
-    if (mpBox) mpBox.textContent = `MP (${potionMPCount})`;
+    const hpCount = document.getElementById('potion-hp-count');
+    const mpCount = document.getElementById('potion-mp-count');
+    if (hpCount) hpCount.textContent = `${potionHPCount}`;
+    if (mpCount) mpCount.textContent = `${potionMPCount}`;
+}
+
+function usePotion(type) {
+    if (gamePaused) return;
+    if (isAITrainingMode) return;
+    if (!playerSpawned || isPlayerDead) return;
+    
+    if (potionUseCooldown > 0) {
+        console.log(`⏳ Cooldown poción: ${potionUseCooldown.toFixed(1)}s`);
+        return;
+    }
+    
+    if (type === 'hp') {
+        if (potionHPCount <= 0) { console.log('⛔ Sin pociones HP'); return; }
+        if (playerHealth >= playerMaxHealth) { console.log('⛔ HP lleno'); return; }
+        
+        potionHPCount--;
+        playerHealth = Math.min(playerMaxHealth, playerHealth + 50);
+        potionUseCooldown = CONFIG.POTION_USE_COOLDOWN;
+        console.log(`💊 Poción HP usada (+50) | HP: ${Math.floor(playerHealth)}/${playerMaxHealth} | Quedan: ${potionHPCount}`);
+        
+        flashPotionHUD('hp');
+    } else if (type === 'mp') {
+        if (potionMPCount <= 0) { console.log('⛔ Sin pociones MP'); return; }
+        if (playerMana >= playerMaxMana) { console.log('⛔ MP lleno'); return; }
+        
+        potionMPCount--;
+        playerMana = Math.min(playerMaxMana, playerMana + 50);
+        potionUseCooldown = CONFIG.POTION_USE_COOLDOWN;
+        console.log(`💧 Poción MP usada (+50) | MP: ${Math.floor(playerMana)}/${playerMaxMana} | Quedan: ${potionMPCount}`);
+        
+        flashPotionHUD('mp');
+    }
+    
+    updatePlayerHUD();
+    updatePotionHUD();
+}
+
+function flashPotionHUD(type) {
+    const box = document.getElementById(type === 'hp' ? 'potion-hp-box' : 'potion-mp-box');
+    if (!box) return;
+    const originalBg = box.style.background;
+    box.style.background = 'rgba(68,255,136,0.6)';
+    box.style.transform = 'scale(1.15)';
+    setTimeout(() => {
+        box.style.background = originalBg;
+        box.style.transform = 'scale(1)';
+    }, 200);
 }
 
 function getPlayerRespawnTime() {
@@ -2061,6 +2430,7 @@ function getPlayerRespawnTime() {
 
 function playerTakeDamage(damage) {
     if (isPlayerDead) return;
+    if (!playerSpawned) return;
     playerHealth -= damage;
     if (playerHealth < 0) playerHealth = 0;
     updatePlayerHUD();
@@ -2072,6 +2442,7 @@ function playerTakeDamage(damage) {
         playerKillStreak = 0;
         playerAIIsRetreating = false;
         playerAIRetreatTimer = 0;
+        playerAIRetreatCooldown = 0;
         playerAILastDamageTime = -999;
         if (ECONOMY.PENALTY_PLAYER_DEATH > 0 && !isAITrainingMode) {
             playerGold = Math.max(0, playerGold - ECONOMY.PENALTY_PLAYER_DEATH);
@@ -2079,10 +2450,6 @@ function playerTakeDamage(damage) {
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ENEMY AXIE
-// ═══════════════════════════════════════════════════════════════
 
 let enemyAxieGold = 0;
 let enemyAxieItems = {};
@@ -2092,6 +2459,7 @@ let enemyAxieShopUses = 0;
 const ENEMY_AXIE_SHOP_COOLDOWN = 8.0;
 const ENEMY_AXIE_SHOP_MAX_USES = 3;
 let enemyAxieIsShopping = false;
+let enemyAxieShopInteractionTimer = 0;
 
 function enemyAxieTakeDamage(damage) {
     if (enemyAxieIsDead || !enemyAxie) return;
@@ -2112,6 +2480,7 @@ function enemyAxieTakeDamage(damage) {
         enemyAxieIsShopping = false;
         enemyAxieIsRetreating = false;
         enemyAxieRetreatTimer = 0;
+        enemyAxieRetreatCooldown = 0;
         enemyAxieLastDamageTime = -999;
         enemyAxieBrain.stats._forcedPlayerTarget = null;
         enemyAxieBrain.stats.deaths++;
@@ -2175,6 +2544,7 @@ function makeEnemyAxieRef() {
 
 function spawnEnemyAxie() {
     if (enemyAxieSpawned || gameFinished) return;
+    console.log(`🤖 [t=${gameTime.toFixed(2)}s] Spawneando Axie enemigo...`);
     const allAxies = getAllAxies();
     const available = allAxies.filter(a => a.id !== selectedAxieId);
     const randomAxie = available[Math.floor(Math.random() * available.length)];
@@ -2188,12 +2558,18 @@ function spawnEnemyAxie() {
     enemyAxieIsShopping = false;
     enemyAxieIsRetreating = false;
     enemyAxieRetreatTimer = 0;
+    enemyAxieRetreatCooldown = 0;
     enemyAxieLastDamageTime = -999;
     enemyAxieBrain.stats._forcedPlayerTarget = null;
     enemyAxieBrain.stats._lastTargetType = null;
+    enemyAxiePotionCount = 0;
+    enemyAxiePotionCooldown = 0;
     
     const loader = new GLTFLoader();
-    loader.load(randomAxie.modelo, (gltf) => {
+    // 🔧 FIX: resolver ruta con función auxiliar
+    const modelPath = getAxieModelPath(randomAxie);
+    console.log(`🤖 Cargando Axie enemigo: ${randomAxie.nombre} desde ${modelPath}`);
+    loader.load(modelPath, (gltf) => {
         enemyAxieModel = gltf.scene;
         enemyAxieModel.position.set(ENEMY_AXIE_SPAWN_POS.x, GROUND_Y - 0.5, ENEMY_AXIE_SPAWN_POS.z);
         const escala = randomAxie.escala || 1.2;
@@ -2213,7 +2589,10 @@ function spawnEnemyAxie() {
         enemyAxieModel.add(hb.sprite);
         enemyHealthBarMat = hb.spriteMat;
         enemyAxieSpawned = true;
-    }, undefined, () => { crearEnemyAxieFallback(randomAxie); });
+    }, undefined, (err) => {
+        console.error(`❌ Error cargando Axie enemigo:`, err);
+        crearEnemyAxieFallback(randomAxie);
+    });
 }
 
 function crearEnemyAxieFallback(axieData) {
@@ -2240,6 +2619,20 @@ function updateEnemyHealthBar() {
 }
 
 function buyEnemyAxieItems() {
+    if (enemyAxieGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && enemyAxiePotionCount < CONFIG.AXIE_MAX_POTIONS) {
+        const cantidad = Math.min(
+            Math.floor(enemyAxieGold / CONFIG.AXIE_POTION_COST),
+            CONFIG.AXIE_MAX_POTIONS - enemyAxiePotionCount
+        );
+        if (cantidad > 0) {
+            const costo = cantidad * CONFIG.AXIE_POTION_COST;
+            enemyAxieGold -= costo;
+            enemyAxiePotionCount += cantidad;
+            console.log(`🧪 Axie enemigo compró ${cantidad} pociones (total: ${enemyAxiePotionCount}/${CONFIG.AXIE_MAX_POTIONS}) | Oro: ${enemyAxieGold}`);
+            return;
+        }
+    }
+    
     const hpPct = enemyAxie.health / enemyAxieMaxHealth;
     const enemiesAlive = aliados.filter(m => !m.isDead).length;
     const allyTowersAlive = towers.filter(t => !t.isDead && !t.isEnemy).length;
@@ -2263,6 +2656,20 @@ function buyEnemyAxieItems() {
 }
 
 function buyPlayerAIItems() {
+    if (playerAIGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && playerAIPotionCount < CONFIG.AXIE_MAX_POTIONS) {
+        const cantidad = Math.min(
+            Math.floor(playerAIGold / CONFIG.AXIE_POTION_COST),
+            CONFIG.AXIE_MAX_POTIONS - playerAIPotionCount
+        );
+        if (cantidad > 0) {
+            const costo = cantidad * CONFIG.AXIE_POTION_COST;
+            playerAIGold -= costo;
+            playerAIPotionCount += cantidad;
+            console.log(`🧪 Jugador-IA compró ${cantidad} pociones (total: ${playerAIPotionCount}/${CONFIG.AXIE_MAX_POTIONS}) | Oro: ${playerAIGold}`);
+            return;
+        }
+    }
+    
     const hpPct = playerHealth / playerMaxHealth;
     const enemiesAlive = enemigos.filter(m => !m.isDead).length;
     const enemyTowersAlive = towers.filter(t => !t.isDead && t.isEnemy).length;
@@ -2285,18 +2692,32 @@ function buyPlayerAIItems() {
     }
 }
 
-// 🎯 JERARQUÍA: MINIONS > AXIE (si cerca) > TORRES > NEXO
 function findBestEnemyTarget() {
     if (!enemyAxieModel || enemyAxieIsDead) return null;
     const enemyPos = enemyAxieModel.position;
     const w = enemyAxieBrain.weights;
     const hpPct = enemyAxie.health / enemyAxieMaxHealth;
     
-    // Tienda
+    const timeSinceDamageShop = gameTime - enemyAxieLastDamageTime;
+    const underAttack = timeSinceDamageShop < CONFIG.AXIE_SHOP_DAMAGE_MEMORY;
+    const lowHP = hpPct < CONFIG.AXIE_SHOP_HP_MIN;
+    
     const canUseShop = shopEnemiga && enemyAxieShopCooldown <= 0 && enemyAxieShopUses < ENEMY_AXIE_SHOP_MAX_USES;
-    if (hpPct < w.retreatHP && canUseShop) {
+    const hasItemsToBuy = Object.entries(ENEMY_AXIE_ITEM_CATALOG).some(([id, item]) => {
+        const stack = enemyAxieItems[id] || 0;
+        return stack < item.maxStack && enemyAxieGold >= item.cost;
+    });
+    const hasGoldForPotions = enemyAxieGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && enemyAxiePotionCount < CONFIG.AXIE_MAX_POTIONS;
+    const hasMinGold = enemyAxieGold >= 30;
+    
+    if (hasMinGold && !underAttack && !lowHP && (hasItemsToBuy || hasGoldForPotions) && canUseShop) {
         const dts = enemyPos.distanceTo(shopEnemiga.group.position);
-        if (dts < 30) return { position: shopEnemiga.group.position, type: 'shop', isDead: false, dist: dts, isShopRun: true };
+        if (dts < 40) {
+            const shopPos = shopEnemiga.group.position.clone();
+            shopPos.x = Math.max(-17, Math.min(17, shopPos.x));
+            shopPos.z = Math.max(-26, Math.min(26, shopPos.z));
+            return { position: shopPos, type: 'shop', isDead: false, dist: dts, isShopRun: true };
+        }
     }
 
     const candidates = [];
@@ -2306,7 +2727,6 @@ function findBestEnemyTarget() {
     const myTowers = towers.filter(t => !t.isDead && t.isEnemy);
     const hasAdvantage = myAlliesAlive > enemiesAlive;
 
-    // 🥇 MINIONS en el carril
     for (const minion of aliados) {
         if (minion.isDead) continue;
         if (Math.abs(minion.group.position.x) > 3.0) continue;
@@ -2320,17 +2740,17 @@ function findBestEnemyTarget() {
         candidates.push({ position: minion.group.position, type: 'minion', health: minion.health, isDead: minion.isDead, ref: minion, dist, score, reason: '🗡️ Limpiar carril' });
     }
 
-    // 🥈 JUGADOR (solo si cerca)
-    if (playerModel && !isPlayerDead) {
+    if (playerModel && !isPlayerDead && playerSpawned) {
         const dist = enemyPos.distanceTo(playerModel.position);
-        if (dist < ENEMY_AXIE_ATTACK_RANGE + 2.0) {
-            let score = 150;
-            if (playerHealth / playerMaxHealth < 0.3) score += 60;
-            candidates.push({ position: playerModel.position, type: 'player', health: playerHealth, isDead: isPlayerDead, ref: { group: playerModel, type: 'player' }, dist, score, takeDamage: playerTakeDamage, reason: '⚔️ Jugador (cerca)' });
+        const playerAggroRange = CONFIG.AXIE_AGGRO_TO_PLAYER + (w.focusPlayer - 1.0) * 3.0;
+        if (dist < playerAggroRange && Math.abs(playerModel.position.x - enemyPos.x) < 3.5) {
+            let score = 250 - dist * 5;
+            if (playerHealth / playerMaxHealth < 0.3) score += 100;
+            if (playerHealth / playerMaxHealth < 0.15) score += 150;
+            candidates.push({ position: playerModel.position, type: 'player', health: playerHealth, isDead: isPlayerDead, ref: { group: playerModel, type: 'player' }, dist, score, takeDamage: playerTakeDamage, reason: '⚔️ Jugador' });
         }
     }
 
-    // 🥉 TORRES (solo sin minions en carril)
     const minionsInLane = aliados.filter(m => !m.isDead && Math.abs(m.group.position.x) < 3.0).length;
     if (minionsInLane === 0) {
         for (const tower of aliveAllyTowers) {
@@ -2347,7 +2767,6 @@ function findBestEnemyTarget() {
         }
     }
 
-    // 🛡️ Defensa
     for (const myTower of myTowers) {
         for (const enemy of aliados) {
             if (enemy.isDead) continue;
@@ -2356,13 +2775,12 @@ function findBestEnemyTarget() {
                 if (d < 16) candidates.push({ position: enemy.group.position, type: 'defend', isDead: enemy.isDead, ref: enemy, dist: d, score: 250, reason: '🛡️ Defensa' });
             }
         }
-        if (playerModel && !isPlayerDead && playerModel.position.distanceTo(myTower.position) < 6.5) {
+        if (playerModel && !isPlayerDead && playerSpawned && playerModel.position.distanceTo(myTower.position) < 6.5) {
             const d = enemyPos.distanceTo(playerModel.position);
             if (d < 16) candidates.push({ position: playerModel.position, type: 'defend_player', isDead: isPlayerDead, ref: { group: playerModel, type: 'player' }, dist: d, score: 260 });
         }
     }
 
-    // 💎 Nexo
     if (nexusAliado && !nexusAliado.isDead && aliveAllyTowers.length === 0 && minionsInLane === 0) {
         const dist = enemyPos.distanceTo(nexusAliado.position);
         if (dist < 30) {
@@ -2379,6 +2797,12 @@ function findBestEnemyTarget() {
 
 function enemyAxieAttack(target) {
     if (!target || target.isDead || enemyAxieIsDead) return;
+    if (target.type === 'tower' || target.type === 'nexus') {
+        enemyAxieBrain.weights.focusStructure = Math.min(2.5, enemyAxieBrain.weights.focusStructure + 0.03);
+    }
+    if (target.type === 'player' || target.type === 'defend_player') {
+        enemyAxieBrain.weights.focusPlayer = Math.min(2.5, enemyAxieBrain.weights.focusPlayer + 0.05);
+    }
     const isCrit = Math.random() < enemyAxieBonuses.critChance;
     const fd = Math.round(ENEMY_AXIE_ATTACK_DAMAGE * enemyAxieBonuses.damageMultiplier * (isCrit ? 2 : 1));
     if (target.type === 'player' || target.type === 'defend_player') {
@@ -2414,6 +2838,17 @@ function updateEnemyAxie(delta) {
         }
         return;
     }
+    
+    if (enemyAxiePotionCooldown > 0) enemyAxiePotionCooldown -= delta;
+    const hpPctNow = enemyAxie.health / enemyAxieMaxHealth;
+    if (hpPctNow < CONFIG.AXIE_POTION_USE_THRESHOLD && enemyAxiePotionCount > 0 && enemyAxiePotionCooldown <= 0) {
+        enemyAxiePotionCount--;
+        enemyAxiePotionCooldown = ENEMY_AXIE_POTION_COOLDOWN;
+        enemyAxie.health = Math.min(enemyAxieMaxHealth, enemyAxie.health + CONFIG.AXIE_POTION_HEAL);
+        updateEnemyHealthBar();
+        console.log(`💊 Axie enemigo usó poción (+${CONFIG.AXIE_POTION_HEAL} HP) | HP: ${Math.floor(enemyAxie.health)}/${enemyAxieMaxHealth} | Pociones: ${enemyAxiePotionCount}`);
+    }
+    
     if (enemyAxieShopCooldown > 0) {
         enemyAxieShopCooldown -= delta;
         if (enemyAxieShopCooldown < 0) enemyAxieShopCooldown = 0;
@@ -2422,72 +2857,170 @@ function updateEnemyAxie(delta) {
     if (Math.abs(diffY) > 0.001) enemyAxieModel.position.y += diffY * Math.min(1, 6 * delta);
     else enemyAxieModel.position.y = GROUND_Y;
     
+    if (enemyAxieRetreatCooldown > 0) enemyAxieRetreatCooldown -= delta;
+    if (enemyAxieRetreatTimer > 0) enemyAxieRetreatTimer -= delta;
+
     const timeSinceDamage = gameTime - enemyAxieLastDamageTime;
     const hasRecentDamage = timeSinceDamage < ENEMY_AXIE_DAMAGE_MEMORY;
-    const nearAllyTower = towers.some(t => !t.isDead && !t.isEnemy && enemyAxieModel.position.distanceTo(t.position) < ENEMY_AXIE_RETREAT_TOWER_RANGE);
-    if (hasRecentDamage && nearAllyTower && !enemyAxieIsRetreating && enemyAxieRetreatTimer <= 0) {
-        const nearTower = towers.find(t => !t.isDead && !t.isEnemy && enemyAxieModel.position.distanceTo(t.position) < ENEMY_AXIE_RETREAT_TOWER_RANGE);
-        if (!nearTower || nearTower.health / nearTower.maxHealth >= 0.15) {
-            enemyAxieIsRetreating = true;
-            enemyAxieRetreatTimer = ENEMY_AXIE_RETREAT_DURATION;
-            console.log('🚨 Axie enemigo retrocede');
-        }
+    const nearShootingTower = towers.some(t => 
+        !t.isDead && !t.isEnemy && 
+        enemyAxieModel.position.distanceTo(t.position) < (t.range + 0.5)
+    );
+    
+    if (hasRecentDamage && nearShootingTower && !enemyAxieIsRetreating && enemyAxieRetreatCooldown <= 0) {
+        enemyAxieIsRetreating = true;
+        enemyAxieRetreatTimer = CONFIG.AXIE_RETREAT_MIN_TIME;
+        console.log('🚨 Axie enemigo retrocede fuera del rango de torre');
     }
-    if (enemyAxieRetreatTimer > 0) {
-        enemyAxieRetreatTimer -= delta;
-        if (enemyAxieRetreatTimer <= 0) { enemyAxieRetreatTimer = 0; enemyAxieIsRetreating = false; }
-    }
+    
     if (enemyAxieIsRetreating) {
-        const retreatTarget = new THREE.Vector3(enemyAxieModel.position.x, GROUND_Y, 15);
-        const dx = retreatTarget.x - enemyAxieModel.position.x;
-        const dz = retreatTarget.z - enemyAxieModel.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist > 1.0) {
-            const ms = ENEMY_AXIE_SPEED * enemyAxieBonuses.speedMultiplier * 1.15 * delta;
-            enemyAxieModel.position.x += (dx / dist) * ms;
-            enemyAxieModel.position.z += (dz / dist) * ms;
-            enemyAxieModel.rotation.y = Math.atan2(dx, dz);
-            if (enemyAxieCurrentAnim !== 'walk' && enemyAxieAnimWalk) {
-                if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
-                enemyAxieAnimWalk.play();
-                enemyAxieCurrentAnim = 'walk';
-            }
+        const mustKeepRetreating = enemyAxieRetreatTimer > 0;
+        const shootingTowers = towers.filter(t => !t.isDead && !t.isEnemy);
+        let nearestTower = null;
+        let nearestTowerDist = Infinity;
+        for (const t of shootingTowers) {
+            const d = enemyAxieModel.position.distanceTo(t.position);
+            if (d < nearestTowerDist) { nearestTowerDist = d; nearestTower = t; }
         }
+        
+        if (nearestTower) {
+            const safeDist = nearestTower.range + CONFIG.AXIE_RETREAT_SAFE_DISTANCE;
+            const dx = enemyAxieModel.position.x - nearestTower.position.x;
+            const dz = enemyAxieModel.position.z - nearestTower.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < safeDist || mustKeepRetreating) {
+                const targetX = nearestTower.position.x + (dx / (dist || 1)) * safeDist;
+                const targetZ = nearestTower.position.z + (dz / (dist || 1)) * safeDist;
+                const rdx = targetX - enemyAxieModel.position.x;
+                const rdz = targetZ - enemyAxieModel.position.z;
+                const rdist = Math.sqrt(rdx * rdx + rdz * rdz);
+                
+                if (rdist > 0.15) {
+                    const ms = ENEMY_AXIE_SPEED * 1.3 * enemyAxieBonuses.speedMultiplier * delta;
+                    enemyAxieModel.position.x += (rdx / rdist) * ms;
+                    enemyAxieModel.position.z += (rdz / rdist) * ms;
+                    enemyAxieModel.rotation.y = Math.atan2(rdx, rdz);
+                    
+                    if (enemyAxieCurrentAnim !== 'walk' && enemyAxieAnimWalk) {
+                        if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
+                        enemyAxieAnimWalk.play();
+                        enemyAxieCurrentAnim = 'walk';
+                    }
+                } else if (!mustKeepRetreating) {
+                    enemyAxieIsRetreating = false;
+                    enemyAxieRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+                    console.log('✅ Axie enemigo fuera del rango de torre');
+                }
+            } else if (!mustKeepRetreating) {
+                enemyAxieIsRetreating = false;
+                enemyAxieRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+                console.log('✅ Axie enemigo fuera del rango de torre');
+            }
+        } else if (!mustKeepRetreating) {
+            enemyAxieIsRetreating = false;
+            enemyAxieRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+        }
+        
         enemyAxieModel.position.x = Math.max(-17, Math.min(17, enemyAxieModel.position.x));
+        enemyAxieModel.position.z = Math.max(-26, Math.min(26, enemyAxieModel.position.z));
         updateEnemyHealthBar();
         if (enemyAxieMixer) enemyAxieMixer.update(delta);
         return;
     }
+    
     enemyAxieAttackCooldown -= delta * enemyAxieBonuses.attackSpeedMultiplier;
+
+    if (playerModel && !isPlayerDead && playerSpawned) {
+        const distToPlayer = enemyAxieModel.position.distanceTo(playerModel.position);
+        const playerPhysRange = ENEMY_AXIE_ATTACK_RANGE + enemyAxieBonuses.rangeBonus;
+        if (distToPlayer < playerPhysRange) {
+            enemyAxieModel.rotation.y = Math.atan2(
+                playerModel.position.x - enemyAxieModel.position.x,
+                playerModel.position.z - enemyAxieModel.position.z
+            );
+            if (enemyAxieAttackCooldown <= 0) {
+                enemyAxieAttack({
+                    type: 'player',
+                    isDead: false,
+                    ref: { group: playerModel, type: 'player' }
+                });
+                enemyAxieAttackCooldown = ENEMY_AXIE_ATTACK_SPEED;
+            }
+            if (enemyAxieCurrentAnim !== 'idle' && enemyAxieAnimIdle) {
+                if (enemyAxieAnimWalk) enemyAxieAnimWalk.stop();
+                enemyAxieAnimIdle.play();
+                enemyAxieCurrentAnim = 'idle';
+            }
+            updateEnemyHealthBar();
+            if (enemyAxieMixer) enemyAxieMixer.update(delta);
+            return;
+        }
+    }
+
     const bestTarget = findBestEnemyTarget();
     if (bestTarget) {
         const dynamicRange = ENEMY_AXIE_ATTACK_RANGE + enemyAxieBonuses.rangeBonus;
         const distToTarget = enemyAxieModel.position.distanceTo(bestTarget.position);
+        
         if (bestTarget.isShopRun) {
-            const dx = bestTarget.position.x - enemyAxieModel.position.x;
-            const dz = bestTarget.position.z - enemyAxieModel.position.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-            if (dist > 2.0) {
-                const ms = ENEMY_AXIE_SPEED * 1.15 * enemyAxieBonuses.speedMultiplier * delta;
-                enemyAxieModel.position.x += (dx / dist) * ms;
-                enemyAxieModel.position.z += (dz / dist) * ms;
-                enemyAxieModel.rotation.y = Math.atan2(dx, dz);
-                if (enemyAxieCurrentAnim !== 'walk' && enemyAxieAnimWalk) {
-                    if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
-                    enemyAxieAnimWalk.play();
-                    enemyAxieCurrentAnim = 'walk';
-                }
+            const nearbyEnemyMinion = aliados.find(m => !m.isDead && enemyAxieModel.position.distanceTo(m.group.position) < CONFIG.AXIE_SHOP_ENEMY_NEARBY_RADIUS);
+            const nearbyPlayer = playerModel && !isPlayerDead && playerSpawned && enemyAxieModel.position.distanceTo(playerModel.position) < CONFIG.AXIE_SHOP_ENEMY_NEARBY_RADIUS;
+            
+            if (nearbyEnemyMinion || nearbyPlayer) {
+                enemyAxieShopCooldown = 5.0;
+                enemyAxieIsShopping = false;
+                console.log('⚔️ Axie enemigo cancela tienda (enemigo cercano)');
             } else {
-                if (!enemyAxieIsShopping) {
-                    enemyAxieIsShopping = true;
-                    enemyAxieShopUses++;
-                    enemyAxieShopCooldown = ENEMY_AXIE_SHOP_COOLDOWN;
-                    if (enemyAxie.health / enemyAxieMaxHealth < 0.6) {
-                        enemyAxie.health = Math.min(enemyAxieMaxHealth, enemyAxie.health + 80);
-                        updateEnemyHealthBar();
+                const timeSinceDamageInShop = gameTime - enemyAxieLastDamageTime;
+                const underAttackInShop = timeSinceDamageInShop < CONFIG.AXIE_SHOP_CANCEL_DAMAGE_MEMORY;
+                const hpPctInShop = enemyAxie.health / enemyAxieMaxHealth;
+                
+                if (underAttackInShop || hpPctInShop < CONFIG.AXIE_SHOP_CANCEL_HP) {
+                    enemyAxieShopCooldown = 5.0;
+                    enemyAxieIsShopping = false;
+                    console.log('⚠️ Axie enemigo cancela ida a tienda (bajo ataque o HP bajo)');
+                } else {
+                    const dx = bestTarget.position.x - enemyAxieModel.position.x;
+                    const dz = bestTarget.position.z - enemyAxieModel.position.z;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    const shopReachDist = 2.0;
+                    if (dist > shopReachDist) {
+                        const ms = ENEMY_AXIE_SPEED * 1.15 * enemyAxieBonuses.speedMultiplier * delta;
+                        enemyAxieModel.position.x += (dx / dist) * ms;
+                        enemyAxieModel.position.z += (dz / dist) * ms;
+                        enemyAxieModel.rotation.y = Math.atan2(dx, dz);
+                        if (enemyAxieCurrentAnim !== 'walk' && enemyAxieAnimWalk) {
+                            if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
+                            enemyAxieAnimWalk.play();
+                            enemyAxieCurrentAnim = 'walk';
+                        }
+                    } else {
+                        if (!enemyAxieIsShopping) {
+                            const canBuySomething = Object.entries(ENEMY_AXIE_ITEM_CATALOG).some(([id, item]) => {
+                                const stack = enemyAxieItems[id] || 0;
+                                return stack < item.maxStack && enemyAxieGold >= item.cost;
+                            }) || (enemyAxieGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && enemyAxiePotionCount < CONFIG.AXIE_MAX_POTIONS);
+                            
+                            if (canBuySomething) {
+                                enemyAxieIsShopping = true;
+                                enemyAxieShopUses++;
+                                enemyAxieShopCooldown = ENEMY_AXIE_SHOP_COOLDOWN;
+                                buyEnemyAxieItems();
+                                console.log('🛒 Axie enemigo compró items');
+                                enemyAxieShopInteractionTimer = 1.0;
+                            } else {
+                                enemyAxieShopCooldown = 5.0;
+                                enemyAxieShopInteractionTimer = 0;
+                                enemyAxieIsShopping = false;
+                                console.log('⚠️ Axie enemigo no puede comprar, volviendo al combate');
+                            }
+                        }
                     }
-                    buyEnemyAxieItems();
-                    setTimeout(() => { enemyAxieIsShopping = false; }, 800);
+                    if (enemyAxieShopInteractionTimer > 0) {
+                        enemyAxieShopInteractionTimer -= delta;
+                        if (enemyAxieShopInteractionTimer <= 0) enemyAxieIsShopping = false;
+                    }
                 }
             }
         } else if (distToTarget <= dynamicRange) {
@@ -2506,7 +3039,8 @@ function updateEnemyAxie(delta) {
             const dz = bestTarget.position.z - enemyAxieModel.position.z;
             const td = Math.sqrt(dx * dx + dz * dz);
             if (td > 0.5) {
-                const ms = ENEMY_AXIE_SPEED * enemyAxieBonuses.speedMultiplier * delta;
+                const speedBoost = (bestTarget.type === 'player' || bestTarget.type === 'defend_player') ? 1.3 : 1.0;
+                const ms = ENEMY_AXIE_SPEED * enemyAxieBonuses.speedMultiplier * speedBoost * delta;
                 enemyAxieModel.position.x += (dx / td) * ms;
                 enemyAxieModel.position.z += (dz / td) * ms;
                 enemyAxieModel.rotation.y = Math.atan2(dx, dz);
@@ -2541,19 +3075,24 @@ function resetEnemyAxie() {
     enemyAxieShopUses = 0;
     enemyAxieShopCooldown = 0;
     enemyAxieIsShopping = false;
+    enemyAxieShopInteractionTimer = 0;
     enemyAxieIsRetreating = false;
     enemyAxieRetreatTimer = 0;
+    enemyAxieRetreatCooldown = 0;
     enemyAxieLastDamageTime = -999;
     enemyAxieGold = 0;
     enemyAxieItems = {};
     enemyAxieBonuses = { speedMultiplier: 1.0, damageMultiplier: 1.0, attackSpeedMultiplier: 1.0, rangeBonus: 0, critChance: 0 };
     enemyAxieBrain.stats._forcedPlayerTarget = null;
     enemyAxieBrain.stats._lastTargetType = null;
+    enemyAxiePotionCount = 0;
+    enemyAxiePotionCooldown = 0;
 }
 
 function resolveMinionCollisions(delta) {
     const all = aliados.concat(enemigos);
     const minDist = CONFIG.MINION_COLLISION_DISTANCE;
+    
     for (let i = 0; i < all.length; i++) {
         const a = all[i];
         if (a.isDead || !a.group.visible) continue;
@@ -2565,7 +3104,7 @@ function resolveMinionCollisions(delta) {
             const dSq = dx * dx + dz * dz;
             if (dSq < minDist * minDist && dSq > 0.0001) {
                 const dist = Math.sqrt(dSq);
-                const overlap = (minDist - dist) * 0.3;
+                const overlap = (minDist - dist) * 0.04;
                 const nx = dx / dist, nz = dz / dist;
                 a.group.position.x -= nx * overlap;
                 a.group.position.z -= nz * overlap;
@@ -2574,9 +3113,13 @@ function resolveMinionCollisions(delta) {
             }
         }
     }
+    
+    for (const m of all) {
+        if (m.isDead || !m.group.visible) continue;
+        clampMinionToLane(m);
+    }
 }
 
-// 🎯 JERARQUÍA JUGADOR-IA: MINIONS > AXIE (si cerca) > TORRES > NEXO
 function findBestPlayerAITarget() {
     if (!playerModel || isPlayerDead) return null;
     const playerPos = playerModel.position;
@@ -2587,7 +3130,6 @@ function findBestPlayerAITarget() {
     const myTowers = towers.filter(t => !t.isDead && !t.isEnemy);
     const hasAdvantage = aliados.filter(m => !m.isDead).length > enemiesAlive;
 
-    // 🥇 MINIONS enemigos en el carril
     for (const minion of enemigos) {
         if (minion.isDead) continue;
         if (Math.abs(minion.group.position.x) > 3.0) continue;
@@ -2601,18 +3143,18 @@ function findBestPlayerAITarget() {
         candidates.push({ position: minion.group.position, type: 'minion', isDead: minion.isDead, ref: minion, dist, score, reason: '🗡️ Limpiar carril' });
     }
 
-    // 🥈 AXIE enemigo (solo si cerca)
     if (enemyAxieModel && !enemyAxieIsDead) {
         const dist = playerPos.distanceTo(enemyAxieModel.position);
-        if (dist < attackRange + 2.0) {
-            let score = 150;
+        const axieAggroRange = CONFIG.AXIE_AGGRO_TO_PLAYER;
+        if (dist < axieAggroRange && Math.abs(enemyAxieModel.position.x - playerPos.x) < 3.5) {
+            let score = 250 - dist * 5;
             const eHP = enemyAxie ? enemyAxie.health / enemyAxieMaxHealth : 1;
-            if (eHP < 0.3) score += 60;
-            candidates.push({ position: enemyAxieModel.position, type: 'enemy_axie', isDead: enemyAxieIsDead, ref: makeEnemyAxieRef(), dist, score, reason: '⚔️ Axie (cerca)' });
+            if (eHP < 0.3) score += 100;
+            if (eHP < 0.15) score += 150;
+            candidates.push({ position: enemyAxieModel.position, type: 'enemy_axie', isDead: enemyAxieIsDead, ref: makeEnemyAxieRef(), dist, score, reason: '⚔️ Axie enemigo' });
         }
     }
 
-    // 🥉 TORRES (solo sin minions en carril)
     const minionsInLane = enemigos.filter(m => !m.isDead && Math.abs(m.group.position.x) < 3.0).length;
     if (minionsInLane === 0) {
         for (const tower of aliveEnemyTowers) {
@@ -2628,7 +3170,6 @@ function findBestPlayerAITarget() {
         }
     }
 
-    // 🛡️ Defensa
     for (const myTower of myTowers) {
         for (const enemy of enemigos) {
             if (enemy.isDead) continue;
@@ -2639,11 +3180,10 @@ function findBestPlayerAITarget() {
         }
         if (enemyAxieModel && !enemyAxieIsDead && enemyAxieModel.position.distanceTo(myTower.position) < 6.5) {
             const d = playerPos.distanceTo(enemyAxieModel.position);
-            if (d < 16) candidates.push({ position: enemyAxieModel.position, type: 'defend_axie', isDead: enemyAxieIsDead, ref: makeEnemyAxieRef(), dist: d, score: 260 });
+            if (d < 16) candidates.push({ position: enemyAxieModel.position, type: 'defend_axie', isDead: enemyAxieIsDead, ref: makeEnemyAxieRef(), dist: d, score: 260, reason: '🛡️ Defensa Axie' });
         }
     }
 
-    // 💎 Nexo
     if (nexusEnemigo && !nexusEnemigo.isDead && aliveEnemyTowers.length === 0 && minionsInLane === 0) {
         const dist = playerPos.distanceTo(nexusEnemigo.position);
         if (dist < 30) {
@@ -2660,66 +3200,129 @@ function findBestPlayerAITarget() {
 
 function updatePlayerAsAI(delta) {
     if (!isAITrainingMode || !playerModel || isPlayerDead || gameFinished) return;
+    if (!playerSpawned) return;
+    
+    if (playerAIPotionCooldown > 0) playerAIPotionCooldown -= delta;
+    const hpPctAI = playerHealth / playerMaxHealth;
+    if (hpPctAI < CONFIG.AXIE_POTION_USE_THRESHOLD && playerAIPotionCount > 0 && playerAIPotionCooldown <= 0) {
+        playerAIPotionCount--;
+        playerAIPotionCooldown = PLAYER_AI_POTION_COOLDOWN;
+        playerHealth = Math.min(playerMaxHealth, playerHealth + CONFIG.AXIE_POTION_HEAL);
+        updatePlayerHUD();
+        console.log(`💊 Jugador-IA usó poción (+${CONFIG.AXIE_POTION_HEAL} HP) | HP: ${Math.floor(playerHealth)}/${playerMaxHealth} | Pociones: ${playerAIPotionCount}`);
+    }
+    
     if (playerAIShopCooldown > 0) {
         playerAIShopCooldown -= delta;
         if (playerAIShopCooldown < 0) playerAIShopCooldown = 0;
     }
+    
+    if (playerAIRetreatCooldown > 0) playerAIRetreatCooldown -= delta;
+    if (playerAIRetreatTimer > 0) playerAIRetreatTimer -= delta;
+
     const timeSinceDamage = gameTime - playerAILastDamageTime;
     const hasRecentDamage = timeSinceDamage < PLAYER_AI_DAMAGE_MEMORY;
-    const nearEnemyTower = towers.some(t => !t.isDead && t.isEnemy && playerModel.position.distanceTo(t.position) < PLAYER_AI_RETREAT_TOWER_RANGE);
-    if (hasRecentDamage && nearEnemyTower && !playerAIIsRetreating && playerAIRetreatTimer <= 0) {
-        const nearTower = towers.find(t => !t.isDead && t.isEnemy && playerModel.position.distanceTo(t.position) < PLAYER_AI_RETREAT_TOWER_RANGE);
-        if (!nearTower || nearTower.health / nearTower.maxHealth >= 0.15) {
-            playerAIIsRetreating = true;
-            playerAIRetreatTimer = PLAYER_AI_RETREAT_DURATION;
-            console.log('🚨 Jugador-IA retrocede');
-        }
+    const nearShootingTower = towers.some(t => 
+        !t.isDead && t.isEnemy && 
+        playerModel.position.distanceTo(t.position) < (t.range + 0.5)
+    );
+    
+    if (hasRecentDamage && nearShootingTower && !playerAIIsRetreating && playerAIRetreatCooldown <= 0) {
+        playerAIIsRetreating = true;
+        playerAIRetreatTimer = CONFIG.AXIE_RETREAT_MIN_TIME;
+        console.log('🚨 Jugador-IA retrocede fuera del rango de torre');
     }
-    if (playerAIRetreatTimer > 0) {
-        playerAIRetreatTimer -= delta;
-        if (playerAIRetreatTimer <= 0) { playerAIRetreatTimer = 0; playerAIIsRetreating = false; }
-    }
+    
     if (playerAIIsRetreating) {
-        const retreatTarget = new THREE.Vector3(playerModel.position.x, GROUND_Y, -15);
-        const dx = retreatTarget.x - playerModel.position.x;
-        const dz = retreatTarget.z - playerModel.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist > 1.0) {
-            const ms = playerSpeed * playerAIBonuses.speedMultiplier * 1.15 * delta;
-            smoothPlayerPos.x += (dx / dist) * ms;
-            smoothPlayerPos.z += (dz / dist) * ms;
-            smoothPlayerPos.y = GROUND_Y;
-            smoothPlayerPos.x = Math.max(-17, Math.min(17, smoothPlayerPos.x));
-            smoothPlayerPos.z = Math.max(-27, Math.min(27, smoothPlayerPos.z));
-            if (currentAnim !== 'walk' && animWalk) {
-                if (animIdle) animIdle.stop();
-                animWalk.play();
-                currentAnim = 'walk';
-            }
-            const angle = Math.atan2(dx, dz);
-            let diff = angle - playerModel.rotation.y;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            playerModel.rotation.y += diff * Math.min(1, 6 * delta);
+        const mustKeepRetreating = playerAIRetreatTimer > 0;
+        const shootingTowers = towers.filter(t => !t.isDead && t.isEnemy);
+        let nearestTower = null;
+        let nearestTowerDist = Infinity;
+        for (const t of shootingTowers) {
+            const d = playerModel.position.distanceTo(t.position);
+            if (d < nearestTowerDist) { nearestTowerDist = d; nearestTower = t; }
         }
+        
+        if (nearestTower) {
+            const safeDist = nearestTower.range + CONFIG.AXIE_RETREAT_SAFE_DISTANCE;
+            const dx = smoothPlayerPos.x - nearestTower.position.x;
+            const dz = smoothPlayerPos.z - nearestTower.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < safeDist || mustKeepRetreating) {
+                const targetX = nearestTower.position.x + (dx / (dist || 1)) * safeDist;
+                const targetZ = nearestTower.position.z + (dz / (dist || 1)) * safeDist;
+                const rdx = targetX - smoothPlayerPos.x;
+                const rdz = targetZ - smoothPlayerPos.z;
+                const rdist = Math.sqrt(rdx * rdx + rdz * rdz);
+                
+                if (rdist > 0.15) {
+                    const ms = playerSpeed * 1.3 * playerAIBonuses.speedMultiplier * delta;
+                    smoothPlayerPos.x += (rdx / rdist) * ms;
+                    smoothPlayerPos.z += (rdz / rdist) * ms;
+                    smoothPlayerPos.y = GROUND_Y;
+                    smoothPlayerPos.x = Math.max(-17, Math.min(17, smoothPlayerPos.x));
+                    smoothPlayerPos.z = Math.max(-26, Math.min(26, smoothPlayerPos.z));
+                    
+                    if (currentAnim !== 'walk' && animWalk) {
+                        if (animIdle) animIdle.stop();
+                        animWalk.play();
+                        currentAnim = 'walk';
+                    }
+                    
+                    const angle = Math.atan2(rdx, rdz);
+                    let diff = angle - playerModel.rotation.y;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    playerModel.rotation.y += diff * Math.min(1, 6 * delta);
+                } else if (!mustKeepRetreating) {
+                    playerAIIsRetreating = false;
+                    playerAIRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+                    console.log('✅ Jugador-IA fuera del rango de torre');
+                }
+            } else if (!mustKeepRetreating) {
+                playerAIIsRetreating = false;
+                playerAIRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+                console.log('✅ Jugador-IA fuera del rango de torre');
+            }
+        } else if (!mustKeepRetreating) {
+            playerAIIsRetreating = false;
+            playerAIRetreatCooldown = CONFIG.AXIE_RETREAT_COOLDOWN;
+        }
+        
         playerModel.position.x = smoothPlayerPos.x;
         playerModel.position.z = smoothPlayerPos.z;
         playerModel.position.y = GROUND_Y;
         return;
     }
+    
     playerAITargetTimer -= delta;
-    const hpPct = playerHealth / playerMaxHealth;
+    
+    const timeSinceDamageShopAI = gameTime - playerAILastDamageTime;
+    const underAttackAI = timeSinceDamageShopAI < CONFIG.AXIE_SHOP_DAMAGE_MEMORY;
+    const lowHPAI = hpPctAI < CONFIG.AXIE_SHOP_HP_MIN;
+    
     const canUseShop = shopAliada && playerAIShopCooldown <= 0 && playerAIShopUses < PLAYER_AI_SHOP_MAX_USES;
-    if (hpPct < 0.3 && canUseShop && (!playerAITarget || playerAITarget.type !== 'shop_run')) {
+    const hasItemsToBuyAI = Object.entries(ENEMY_AXIE_ITEM_CATALOG).some(([id, item]) => {
+        const stack = playerAIItems[id] || 0;
+        return stack < item.maxStack && playerAIGold >= item.cost;
+    });
+    const hasGoldForPotionsAI = playerAIGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && playerAIPotionCount < CONFIG.AXIE_MAX_POTIONS;
+    const hasMinGoldAI = playerAIGold >= 30;
+    
+    if (hasMinGoldAI && !underAttackAI && !lowHPAI && (hasItemsToBuyAI || hasGoldForPotionsAI) && canUseShop && (!playerAITarget || playerAITarget.type !== 'shop_run')) {
         const dts = playerModel.position.distanceTo(shopAliada.group.position);
-        if (dts < 30) {
-            playerAITarget = { type: 'shop_run', position: shopAliada.group.position, ref: shopAliada, isShopRun: true };
+        if (dts < 40) {
+            const shopPos = shopAliada.group.position.clone();
+            shopPos.x = Math.max(-17, Math.min(17, shopPos.x));
+            shopPos.z = Math.max(-26, Math.min(26, shopPos.z));
+            playerAITarget = { type: 'shop_run', position: shopPos, ref: shopAliada, isShopRun: true };
             playerAITargetTimer = 1.5;
         }
     }
     if (!playerAITarget || playerAITarget.isDead || playerAITargetTimer <= 0) {
         playerAITarget = findBestPlayerAITarget();
-        playerAITargetTimer = 1.5;
+        playerAITargetTimer = 0.5;
     }
     if (!playerAITarget) {
         if (currentAnim !== 'idle' && animIdle) {
@@ -2730,38 +3333,66 @@ function updatePlayerAsAI(delta) {
         return;
     }
     if (playerAITarget.isShopRun) {
-        const shopPos = shopAliada.group.position;
-        const dx = shopPos.x - playerModel.position.x;
-        const dz = shopPos.z - playerModel.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist > 2.0) {
-            const ms = playerSpeed * playerAIBonuses.speedMultiplier * delta;
-            smoothPlayerPos.x += (dx / dist) * ms;
-            smoothPlayerPos.z += (dz / dist) * ms;
-            smoothPlayerPos.y = GROUND_Y;
-            smoothPlayerPos.x = Math.max(-17, Math.min(17, smoothPlayerPos.x));
-            smoothPlayerPos.z = Math.max(-27, Math.min(27, smoothPlayerPos.z));
-            if (currentAnim !== 'walk' && animWalk) {
-                if (animIdle) animIdle.stop();
-                animWalk.play();
-                currentAnim = 'walk';
-            }
-            const angle = Math.atan2(dx, dz);
-            let diff = angle - playerModel.rotation.y;
-            while (diff > Math.PI) diff -= Math.PI * 2;
-            while (diff < -Math.PI) diff += Math.PI * 2;
-            playerModel.rotation.y += diff * Math.min(1, 6 * delta);
+        const timeSinceDamageInShopAI = gameTime - playerAILastDamageTime;
+        const underAttackInShopAI = timeSinceDamageInShopAI < CONFIG.AXIE_SHOP_CANCEL_DAMAGE_MEMORY;
+        const hpPctInShopAI = playerHealth / playerMaxHealth;
+        
+        const nearbyEnemyMinionAI = enemigos.find(m => !m.isDead && playerModel.position.distanceTo(m.group.position) < CONFIG.AXIE_SHOP_ENEMY_NEARBY_RADIUS);
+        const nearbyEnemyAxie = enemyAxieModel && !enemyAxieIsDead && playerModel.position.distanceTo(enemyAxieModel.position) < CONFIG.AXIE_SHOP_ENEMY_NEARBY_RADIUS;
+        
+        if (underAttackInShopAI || hpPctInShopAI < CONFIG.AXIE_SHOP_CANCEL_HP || nearbyEnemyMinionAI || nearbyEnemyAxie) {
+            playerAIShopCooldown = 5.0;
+            playerAIIsShopping = false;
+            playerAITarget = null;
+            console.log('⚠️ Jugador-IA cancela ida a tienda');
         } else {
-            if (!playerAIIsShopping) {
-                playerAIIsShopping = true;
-                playerAIShopUses++;
-                playerAIShopCooldown = PLAYER_AI_SHOP_COOLDOWN;
-                if (playerHealth / playerMaxHealth < 0.6) {
-                    playerHealth = Math.min(playerMaxHealth, playerHealth + 80);
-                    updatePlayerHUD();
+            const shopPos = playerAITarget.position;
+            const dx = shopPos.x - playerModel.position.x;
+            const dz = shopPos.z - playerModel.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            const shopReachDist = 2.0;
+            if (dist > shopReachDist) {
+                const ms = playerSpeed * playerAIBonuses.speedMultiplier * delta;
+                smoothPlayerPos.x += (dx / dist) * ms;
+                smoothPlayerPos.z += (dz / dist) * ms;
+                smoothPlayerPos.y = GROUND_Y;
+                smoothPlayerPos.x = Math.max(-17, Math.min(17, smoothPlayerPos.x));
+                smoothPlayerPos.z = Math.max(-26, Math.min(26, smoothPlayerPos.z));
+                if (currentAnim !== 'walk' && animWalk) {
+                    if (animIdle) animIdle.stop();
+                    animWalk.play();
+                    currentAnim = 'walk';
                 }
-                buyPlayerAIItems();
-                setTimeout(() => { playerAIIsShopping = false; }, 800);
+                const angle = Math.atan2(dx, dz);
+                let diff = angle - playerModel.rotation.y;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                playerModel.rotation.y += diff * Math.min(1, 6 * delta);
+            } else {
+                if (!playerAIIsShopping) {
+                    const canBuySomethingAI = Object.entries(ENEMY_AXIE_ITEM_CATALOG).some(([id, item]) => {
+                        const stack = playerAIItems[id] || 0;
+                        return stack < item.maxStack && playerAIGold >= item.cost;
+                    }) || (playerAIGold >= CONFIG.AXIE_POTION_BUY_THRESHOLD && playerAIPotionCount < CONFIG.AXIE_MAX_POTIONS);
+                    
+                    if (canBuySomethingAI) {
+                        playerAIIsShopping = true;
+                        playerAIShopUses++;
+                        playerAIShopCooldown = PLAYER_AI_SHOP_COOLDOWN;
+                        buyPlayerAIItems();
+                        console.log('🛒 Jugador-IA compró items');
+                        playerAIShopInteractionTimer = 1.0;
+                    } else {
+                        playerAIShopCooldown = 5.0;
+                        playerAIShopInteractionTimer = 0;
+                        playerAIIsShopping = false;
+                        console.log('⚠️ Jugador-IA no puede comprar, volviendo al combate');
+                    }
+                }
+            }
+            if (playerAIShopInteractionTimer > 0) {
+                playerAIShopInteractionTimer -= delta;
+                if (playerAIShopInteractionTimer <= 0) playerAIIsShopping = false;
             }
         }
         playerModel.position.x = smoothPlayerPos.x;
@@ -2784,7 +3415,7 @@ function updatePlayerAsAI(delta) {
         smoothPlayerPos.z += (dz / dist) * ms;
         smoothPlayerPos.y = GROUND_Y;
         smoothPlayerPos.x = Math.max(-17, Math.min(17, smoothPlayerPos.x));
-        smoothPlayerPos.z = Math.max(-27, Math.min(27, smoothPlayerPos.z));
+        smoothPlayerPos.z = Math.max(-26, Math.min(26, smoothPlayerPos.z));
         if (currentAnim !== 'walk' && animWalk) {
             if (animIdle) animIdle.stop();
             animWalk.play();
@@ -2815,7 +3446,7 @@ function updatePlayerAsAI(delta) {
                 playerProjectiles.push(proj);
                 attackCooldown = attackSpeed;
                 isAttacking = true;
-                setTimeout(() => { isAttacking = false; }, 100);
+                setTimeout(() => { isAttacking = false; }, 50);
             }
         }
     }
@@ -2824,10 +3455,6 @@ function updatePlayerAsAI(delta) {
     playerModel.position.y = GROUND_Y;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// MOUSE CONTROLS (modo humano)
-// ═══════════════════════════════════════════════════════════════
-
 let isMouseDownRight = false;
 let isMouseDownLeft = false;
 let isDragging = false;
@@ -2835,6 +3462,7 @@ let mouseDownPos = { x: 0, y: 0 };
 
 function isEnemyForPlayer(entity) {
     if (!entity) return false;
+    if (entity.type === 'shop') return entity.isEnemy === true;
     if (entity.type === 'enemy_axie') return true;
     if (entity.type === 'minion' && entity.isEnemy === true) return true;
     if (entity.type === 'tower' && entity.isEnemy === true) return true;
@@ -2885,6 +3513,29 @@ function getEntityFromClick(event) {
     if (nexusAliado && !nexusAliado.isDead) {
         nexusAliado.group.traverse((child) => {
             if (child.isMesh) { child.userData.targetRef = nexusAliado; selectables.push(child); }
+        });
+    }
+
+    if (shopAliada) {
+        shopAliada.group.traverse((child) => {
+            if (child.isMesh) {
+                child.userData.targetRef = {
+                    type: 'shop', isEnemy: false, ref: shopAliada,
+                    group: shopAliada.group, isDead: false, health: 999999, maxHealth: 999999
+                };
+                selectables.push(child);
+            }
+        });
+    }
+    if (shopEnemiga) {
+        shopEnemiga.group.traverse((child) => {
+            if (child.isMesh) {
+                child.userData.targetRef = {
+                    type: 'shop', isEnemy: true, ref: shopEnemiga,
+                    group: shopEnemiga.group, isDead: false, health: 999999, maxHealth: 999999
+                };
+                selectables.push(child);
+            }
         });
     }
 
@@ -2958,6 +3609,11 @@ renderer.domElement.addEventListener('mouseup', (e) => {
 
     if (e.button === 2 && isMouseDownRight) {
         isMouseDownRight = false;
+        if (shopOpen && !isDragging) {
+            closeShop();
+            isDragging = false;
+            return;
+        }
         if (!isDragging) {
             const point = getGroundIntersection(e);
             if (point) {
@@ -2972,10 +3628,6 @@ renderer.domElement.addEventListener('mouseup', (e) => {
         isDragging = false;
     }
 });
-
-// ═══════════════════════════════════════════════════════════════
-// UI Y GAME LOOP
-// ═══════════════════════════════════════════════════════════════
 
 function showPauseMenu() {
     if (gamePaused) return;
@@ -2997,6 +3649,7 @@ function showPauseMenu() {
 
 function hidePauseMenu() {
     gamePaused = false;
+    lastTime = performance.now();
     if (pauseMenu) { pauseMenu.remove(); pauseMenu = null; }
 }
 
@@ -3023,6 +3676,8 @@ function abandonGame() {
     for (const m of aliados) if (m.group && m.group.parent) scene.remove(m.group);
     for (const m of enemigos) if (m.group && m.group.parent) scene.remove(m.group);
     aliados.length = 0; enemigos.length = 0;
+    spawnQueue.length = 0;
+    spawnQueueTimer = 0;
     for (const p of playerProjectiles) if (p.mesh && p.mesh.parent) scene.remove(p.mesh);
     playerProjectiles.length = 0;
     for (const t of towers) if (t.group && t.group.parent) scene.remove(t.group);
@@ -3042,16 +3697,30 @@ function abandonGame() {
     gameFinished = false;
     isPlayerDead = false;
     playerHealth = playerMaxHealth;
+    playerMana = playerMaxMana;
     playerRespawnTimer = 0;
     playerDeathCount = 0;
     playerGold = 0;
     playerKillStreak = 0;
     playerFirstBlood = false;
-    playerItemsOwned = {};
+    playerItemSlots = [null, null, null, null, null, null];
+    potionHPCount = 0;
+    potionMPCount = 0;
+    potionUseCooldown = 0;
     playerAIIsRetreating = false;
     playerAIRetreatTimer = 0;
+    playerAIRetreatCooldown = 0;
     playerAILastDamageTime = -999;
     enemyAxieSpawned = false;
+    enemyAxieShopInteractionTimer = 0;
+    playerAIShopInteractionTimer = 0;
+    shopAutoOpenCooldown = 0;
+    playerSpawned = false;
+    enemyAxiePotionCount = 0;
+    playerAIPotionCount = 0;
+    enemyAxiePotionCooldown = 0;
+    playerAIPotionCooldown = 0;
+    enemyAxieRetreatCooldown = 0;
     resetEnemyAxie();
     if (renderer) renderer.domElement.style.display = 'none';
     showMainMenu();
@@ -3219,19 +3888,21 @@ async function startAIGame(axieId) {
     actualizarPantallaCarga(60, 'Cargando Axie...');
     await loadSelectedAxie(axieId);
     playerModel.position.copy(playerSpawnPosition);
-    playerModel.position.y = GROUND_Y;
+    playerModel.position.y = GROUND_Y - 100;
     smoothPlayerPos.copy(playerSpawnPosition);
     smoothPlayerPos.y = GROUND_Y;
-    playerModel.visible = true;
+    playerModel.visible = false;
+    playerSpawned = false;
     gameFinished = false;
     gameStarted = false;
-    startTimer = CONFIG.SPAWN_DELAY;
+    startTimer = CONFIG.MINION_SPAWN_TIME;
     waveNumber = 1;
     gameTime = 0;
     isFirstWave = true;
     firstWaveTimer = 0;
     isPlayerDead = false;
     playerHealth = playerMaxHealth;
+    playerMana = playerMaxMana;
     playerRespawnTimer = 0;
     isMovingToTarget = false;
     targetPosition = null;
@@ -3246,14 +3917,24 @@ async function startAIGame(axieId) {
     playerAIShopCooldown = 0;
     playerAIShopUses = 0;
     playerAIIsShopping = false;
+    playerAIShopInteractionTimer = 0;
     playerAIIsRetreating = false;
     playerAIRetreatTimer = 0;
+    playerAIRetreatCooldown = 0;
     playerAILastDamageTime = -999;
+    playerAIPotionCount = 0;
+    playerAIPotionCooldown = 0;
     playerDeathCount = 0;
+    shopAutoOpenCooldown = 0;
+    spawnQueue.length = 0;
+    spawnQueueTimer = 0;
     factionFocusTarget.ally.target = null;
     factionFocusTarget.ally.count = 0;
     factionFocusTarget.enemy.target = null;
     factionFocusTarget.enemy.count = 0;
+    potionHPCount = 0;
+    potionMPCount = 0;
+    potionUseCooldown = 0;
     for (const m of aliados) if (m.group && m.group.parent) scene.remove(m.group);
     for (const m of enemigos) if (m.group && m.group.parent) scene.remove(m.group);
     aliados.length = 0; enemigos.length = 0;
@@ -3272,6 +3953,7 @@ async function startAIGame(axieId) {
     resetDynamicCamera();
     chooseNewDynamicCameraTarget();
     if (!playerHUD) { createPlayerHUD(); updatePlayerHUD(); }
+    updatePotionHUD();
     goldDiv.style.display = 'block';
     updatePlayerGoldHUD();
     renderer.domElement.style.display = 'block';
@@ -3285,7 +3967,19 @@ async function startAIGame(axieId) {
     actualizarPantallaCarga(100, '¡Listo!');
     await new Promise(r => setTimeout(r, 200));
     ocultarPantallaCarga();
-    setTimeout(() => { if (!gameFinished && !enemyAxieSpawned) spawnEnemyAxie(); }, 3000);
+    setTimeout(() => {
+        if (gameFinished) return;
+        if (playerModel && !playerSpawned) {
+            playerSpawned = true;
+            playerModel.position.copy(playerSpawnPosition);
+            playerModel.position.y = GROUND_Y;
+            smoothPlayerPos.copy(playerSpawnPosition);
+            smoothPlayerPos.y = GROUND_Y;
+            playerModel.visible = true;
+            console.log(`🦊 [t=${gameTime.toFixed(2)}s] Axie aliado aparece`);
+        }
+        if (!enemyAxieSpawned) spawnEnemyAxie();
+    }, CONFIG.AXIE_SPAWN_TIME * 1000);
     updateHUDEntrenamiento();
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
@@ -3304,22 +3998,27 @@ async function startGame(axieId) {
     actualizarPantallaCarga(60, 'Cargando Axie...');
     await loadSelectedAxie(axieId);
     playerModel.position.copy(playerSpawnPosition);
-    playerModel.position.y = GROUND_Y;
+    playerModel.position.y = GROUND_Y - 100;
     smoothPlayerPos.copy(playerSpawnPosition);
     smoothPlayerPos.y = GROUND_Y;
-    playerModel.visible = true;
+    playerModel.visible = false;
+    playerSpawned = false;
     gameFinished = false;
     gameStarted = false;
-    startTimer = CONFIG.SPAWN_DELAY;
+    startTimer = CONFIG.MINION_SPAWN_TIME;
     waveNumber = 1;
     gameTime = 0;
     isFirstWave = true;
     firstWaveTimer = 0;
     isPlayerDead = false;
     playerHealth = playerMaxHealth;
+    playerMana = playerMaxMana;
     playerRespawnTimer = 0;
     resetPlayerEconomy();
     playerDeathCount = 0;
+    shopAutoOpenCooldown = 0;
+    spawnQueue.length = 0;
+    spawnQueueTimer = 0;
     factionFocusTarget.ally.target = null;
     factionFocusTarget.ally.count = 0;
     factionFocusTarget.enemy.target = null;
@@ -3329,6 +4028,8 @@ async function startGame(axieId) {
     aliados.length = 0; enemigos.length = 0;
     inicializarCamaraFija();
     if (!playerHUD) { createPlayerHUD(); updatePlayerHUD(); }
+    updateItemHUD();
+    updatePotionHUD();
     goldDiv.style.display = 'block';
     updatePlayerGoldHUD();
     renderer.domElement.style.display = 'block';
@@ -3342,7 +4043,19 @@ async function startGame(axieId) {
     actualizarPantallaCarga(100, '¡Listo!');
     await new Promise(r => setTimeout(r, 200));
     ocultarPantallaCarga();
-    setTimeout(() => { if (!gameFinished && !enemyAxieSpawned) spawnEnemyAxie(); }, 3000);
+    setTimeout(() => {
+        if (gameFinished) return;
+        if (playerModel && !playerSpawned) {
+            playerSpawned = true;
+            playerModel.position.copy(playerSpawnPosition);
+            playerModel.position.y = GROUND_Y;
+            smoothPlayerPos.copy(playerSpawnPosition);
+            smoothPlayerPos.y = GROUND_Y;
+            playerModel.visible = true;
+            console.log(`🦊 [t=${gameTime.toFixed(2)}s] Axie aliado aparece`);
+        }
+        if (!enemyAxieSpawned) spawnEnemyAxie();
+    }, CONFIG.AXIE_SPAWN_TIME * 1000);
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
 }
@@ -3394,6 +4107,7 @@ function gameLoop(time) {
         return;
     }
     if (gamePaused) {
+        lastTime = time;
         renderer.render(scene, camera);
         requestAnimationFrame(gameLoop);
         return;
@@ -3402,6 +4116,19 @@ function gameLoop(time) {
     lastTime = time;
     frameCounter++;
     gameTime += delta;
+
+    processSpawnQueue(delta);
+
+    if (potionUseCooldown > 0) {
+        potionUseCooldown -= delta;
+        if (potionUseCooldown < 0) potionUseCooldown = 0;
+    }
+
+    if (shopAutoOpenCooldown > 0) {
+        shopAutoOpenCooldown -= delta;
+        if (shopAutoOpenCooldown < 0) shopAutoOpenCooldown = 0;
+    }
+
     if (window.currentTarget && !isAITrainingMode) {
         let dead = false;
         if (window.currentTarget.isDead === true) dead = true;
@@ -3413,6 +4140,7 @@ function gameLoop(time) {
         if (playerRespawnTimer <= 0 && !gameFinished) {
             isPlayerDead = false;
             playerHealth = playerMaxHealth;
+            playerMana = playerMaxMana;
             playerRespawnTimer = 0;
             updatePlayerHUD();
             if (playerModel) {
@@ -3442,11 +4170,7 @@ function gameLoop(time) {
         updatePlayerAsAI(delta);
         updateHUDEntrenamiento();
     } else {
-        // ═══════════════════════════════════════════════════════════
-        // 🎮 MODO JUGADOR HUMANO
-        // ═══════════════════════════════════════════════════════════
-        if (playerModel && !isPlayerDead) {
-            // Movimiento
+        if (playerModel && !isPlayerDead && playerSpawned) {
             if (isMovingToTarget && targetPosition) {
                 const dx = smoothTargetPos.x - smoothPlayerPos.x;
                 const dz = smoothTargetPos.z - smoothPlayerPos.z;
@@ -3465,7 +4189,7 @@ function gameLoop(time) {
                     smoothPlayerPos.z += (dz / dist) * ms;
                     smoothPlayerPos.y = GROUND_Y;
 
-                    const limitX = 17, limitZ = 27;
+                    const limitX = 17, limitZ = 26;
                     smoothPlayerPos.x = Math.max(-limitX, Math.min(limitX, smoothPlayerPos.x));
                     smoothPlayerPos.z = Math.max(-limitZ, Math.min(limitZ, smoothPlayerPos.z));
 
@@ -3486,7 +4210,6 @@ function gameLoop(time) {
                 playerModel.position.y = GROUND_Y;
             }
 
-            // Auto-combate
             if (window.currentTarget && !window.currentTarget.isDead) {
                 const targetPos = window.currentTarget.group ? window.currentTarget.group.position : window.currentTarget.position;
                 const isEnemy = isEnemyForPlayer(window.currentTarget);
@@ -3520,6 +4243,23 @@ function gameLoop(time) {
                     }
                 }
             }
+
+            if (!shopOpen && shopAutoOpenCooldown <= 0 && shopAliada) {
+                const d = playerModel.position.distanceTo(shopAliada.group.position);
+                if (d <= CONFIG.SHOP_AUTO_OPEN_DISTANCE) {
+                    const pdx = playerModel.position.x - shopAliada.group.position.x;
+                    const pdz = playerModel.position.z - shopAliada.group.position.z;
+                    const pdist = Math.sqrt(pdx * pdx + pdz * pdz) || 1;
+                    const pushDist = 1.0;
+                    smoothPlayerPos.x = shopAliada.group.position.x + (pdx / pdist) * (CONFIG.SHOP_AUTO_OPEN_DISTANCE + pushDist);
+                    smoothPlayerPos.z = shopAliada.group.position.z + (pdz / pdist) * (CONFIG.SHOP_AUTO_OPEN_DISTANCE + pushDist);
+                    smoothPlayerPos.y = GROUND_Y;
+                    playerModel.position.x = smoothPlayerPos.x;
+                    playerModel.position.z = smoothPlayerPos.z;
+                    playerModel.position.y = GROUND_Y;
+                    openShop();
+                }
+            }
         }
     }
 
@@ -3535,7 +4275,7 @@ function gameLoop(time) {
         waveDiv.textContent = `⏳ ${Math.ceil(startTimer)}s`;
         if (startTimer <= 0) {
             gameStarted = true;
-            if (aliados.filter(m => !m.isDead).length === 0 && enemigos.filter(m => !m.isDead).length === 0) {
+            if (aliados.filter(m => !m.isDead).length === 0 && enemigos.filter(m => !m.isDead).length === 0 && spawnQueue.length === 0) {
                 spawnWave();
             }
         }
@@ -3560,7 +4300,7 @@ function gameLoop(time) {
 
     const aa = aliados.filter(m => !m.isDead);
     const ae = enemigos.filter(m => !m.isDead);
-    if (aa.length === 0 || ae.length === 0) {
+    if (spawnQueue.length === 0 && (aa.length === 0 || ae.length === 0)) {
         waveCooldown += delta;
         if (waveCooldown > WAVE_DELAY) { waveCooldown = 0; spawnWave(); }
     } else waveCooldown = 0;
@@ -3609,6 +4349,16 @@ window.showTarget = function (target) {
     else if (target.type === 'nexus') name = target.isEnemy ? '🔥 Nexo Enemigo' : '💎 Nexo Aliado';
     else if (target.type === 'enemy_axie') name = `🤖 ${enemyAxie ? enemyAxie.nombre : 'Axie'}`;
     else if (target.type === 'player') name = `🦊 ${currentAxieName}`;
+    else if (target.type === 'shop') name = target.isEnemy ? '🏪 Tienda Enemiga' : '🏪 Tienda Aliada';
+
+    if (target.type === 'shop') {
+        targetUI.innerHTML = `
+            <div style="font-weight:bold;font-size:14px;color:#ffcc44;margin-bottom:6px;">${name}</div>
+            <div style="font-size:11px;color:#88ddff;">🚶 Camina hacia ella para abrirla</div>
+        `;
+        return;
+    }
+
     const maxHP = target.maxHealth || 100;
     const curHP = target.health || 100;
     const pct = Math.max(0, (curHP / maxHP) * 100);
