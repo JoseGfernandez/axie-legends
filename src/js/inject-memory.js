@@ -28,3 +28,4 @@ if (document.readyState === 'complete') {
     window.addEventListener('load', forceMemoryMonitor);
     setTimeout(forceMemoryMonitor, 2000);
 }
+

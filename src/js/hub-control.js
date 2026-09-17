@@ -112,3 +112,4 @@ window.axieHub = {
 
 setInterval(updateHubUI, 200);
 console.log('✅ HUB controlador integrado correctamente.');
+
