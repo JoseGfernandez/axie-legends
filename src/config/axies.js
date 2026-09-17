@@ -1,6 +1,7 @@
 ﻿// =============================================
 // CONFIGURACIÓN DE AXIES (7 TIPOS CON ESCALAS)
 // =============================================
+import { getAssetUrl } from '../assetHelper.js';
 
 export const AXIE_TYPES = {
     BING: 'bing',
@@ -17,7 +18,7 @@ export const AXIES_DATA = {
         id: 'bing',
         nombre: 'Bing',
         descripcion: 'El líder feroz del equipo',
-        modelo: 'assets/mascots/bing.glb',
+        modelo: getAssetUrl('assets/mascots/bing.glb'),
         color: '#ff4444',
         escala: 1.2,
         stats: { vida: 150, ataque: 20, defensa: 30, velocidad: 1.0 },
@@ -31,7 +32,7 @@ export const AXIES_DATA = {
         id: 'kibo',
         nombre: 'Kibo',
         descripcion: 'Ágil y veloz como el viento',
-        modelo: 'assets/mascots/kibo.glb',
+        modelo: getAssetUrl('assets/mascots/kibo.glb'),
         color: '#44aaff',
         escala: 1.05,
         stats: { vida: 130, ataque: 22, defensa: 25, velocidad: 1.3 },
@@ -45,7 +46,7 @@ export const AXIES_DATA = {
         id: 'kotaro',
         nombre: 'Kotaro',
         descripcion: 'Astuto y estratégico',
-        modelo: 'assets/mascots/kotaro.glb',
+        modelo: getAssetUrl('assets/mascots/kotaro.glb'),
         color: '#ff8844',
         escala: 1.15,
         stats: { vida: 140, ataque: 18, defensa: 28, velocidad: 1.1 },
@@ -59,7 +60,7 @@ export const AXIES_DATA = {
         id: 'paladill',
         nombre: 'Paladill',
         descripcion: 'Portador de la justicia',
-        modelo: 'assets/mascots/paladill.glb',
+        modelo: getAssetUrl('assets/mascots/paladill.glb'),
         color: '#aa66ff',
         escala: 1.0,
         stats: { vida: 160, ataque: 15, defensa: 35, velocidad: 0.9 },
@@ -73,7 +74,7 @@ export const AXIES_DATA = {
         id: 'pomodoro',
         nombre: 'Pomodoro',
         descripcion: 'Pequeño pero letal',
-        modelo: 'assets/mascots/pomodoro.glb',
+        modelo: getAssetUrl('assets/mascots/pomodoro.glb'),
         color: '#44ff88',
         escala: 1.0,
         stats: { vida: 110, ataque: 28, defensa: 18, velocidad: 1.4 },
@@ -87,7 +88,7 @@ export const AXIES_DATA = {
         id: 'tripp',
         nombre: 'Tripp',
         descripcion: 'Místico y poderoso',
-        modelo: 'assets/mascots/tripp.glb',
+        modelo: getAssetUrl('assets/mascots/tripp.glb'),
         color: '#ff66aa',
         escala: 1.1,
         stats: { vida: 120, ataque: 25, defensa: 22, velocidad: 1.2 },
@@ -101,7 +102,7 @@ export const AXIES_DATA = {
         id: 'xia',
         nombre: 'Xia',
         descripcion: 'Brilla con luz propia',
-        modelo: 'assets/mascots/xia.glb',
+        modelo: getAssetUrl('assets/mascots/xia.glb'),
         color: '#ffdd44',
         escala: 1.1,
         stats: { vida: 125, ataque: 23, defensa: 24, velocidad: 1.3 },
@@ -122,4 +123,3 @@ export function getAllAxies() {
 }
 
 export default AXIES_DATA;
-
