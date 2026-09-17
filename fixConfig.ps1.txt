@@ -1,0 +1,28 @@
+$rutaSrc = ".\src"
+Get-ChildItem -Path $rutaSrc -Filter "*.js" -Recurse | ForEach-Object {
+    $archivo = $_.FullName
+    $contenido = Get-Content -Path $archivo -Raw -Encoding utf8
+    $original = $contenido
+
+    # Reemplaza ${import.meta.env.BASE_URL} encerrado entre comillas por la variable limpia
+    $contenido = [System.Text.RegularExpressions.Regex]::Replace(
+        $contenido, 
+        '["'']\$\{import\.meta\.env\.BASE_URL\}["'']', 
+        'import.meta.env.BASE_URL'
+    )
+
+    # Reemplaza concatenaciones con comillas sobrantes
+    $contenido = [System.Text.RegularExpressions.Regex]::Replace(
+        $contenido, 
+        '["'']\s*\+\s*import\.meta\.env\.BASE_URL\s*\+\s*["'']', 
+        'import.meta.env.BASE_URL'
+    )
+
+    if ($contenido -ne $original) {
+        Set-Content -Path $archivo -Value $contenido -Encoding utf8
+        Write-Host "🔧 BASE_URL corregido en: $archivo" -ForegroundColor Green
+    } else {
+        Write-Host "Sin cambios en: $archivo" -ForegroundColor Yellow
+    }
+}
+Write-Host "¡Escaneo y corrección de BASE_URL finalizado!" -ForegroundColor Cyan
