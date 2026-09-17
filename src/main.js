@@ -4,6 +4,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MenuScreen } from './ui/MenuScreen.js';
 import { getAxieById, getAllAxies } from './config/axies.js';
 
+// 🔧 CORRECCIÓN 1: GLTFLoader compartido
+const sharedGLTFLoader = new GLTFLoader();
+
 const CONFIG = {
     gravedad: -20,
     velocidadSalto: 7,
@@ -48,8 +51,8 @@ const CONFIG = {
     SHOP_AUTO_OPEN_COOLDOWN: 1.5,
     MINION_LANE_LIMIT_X: 2.0,
     MINION_LANE_LIMIT_Z: 24,
-    MINION_MAX_Z_ALLY: 16.5,
-    MINION_MAX_Z_ENEMY: -16.5,
+    MINION_MAX_Z_ALLY: 20.0,
+    MINION_MAX_Z_ENEMY: -20.0,
     AXIE_RETREAT_SAFE_DISTANCE: 1.5,
     AXIE_POTION_USE_THRESHOLD: 0.50,
     AXIE_POTION_BUY_THRESHOLD: 300,
@@ -72,20 +75,14 @@ const CONFIG = {
     POTION_USE_COOLDOWN: 1.5,
     DEPLOY_TRIGGER_DIST: 0.5,
     MINION_TOWER_ATTACK_RANGE: 25,
-
-    // 🔧 FIX: Ruta base de los Axies
     AXIES_BASE_PATH: '/public/assets/axies/',
-
     MINION_GLB_MAGE_ENEMY: '/public/assets/minions/mage2_bone.glb',
     MINION_GLB_MELEE_ENEMY: null,
-
     MAGE_GLB_WALK:   '/public/assets/minions/mage2_walk.glb',
     MAGE_GLB_IDLE:   '/public/assets/minions/mage2_idle.glb',
     MAGE_GLB_ATTACK: '/public/assets/minions/mage2_attack.glb',
-    MAGE_GLB_STAFF:  '/public/assets/minions/mage2_staff.glb',
-
+    MAGE_GLB_STAFF:  '/public/assets/weapons_minions/mage2_staff.glb',
     TERRAIN_GLB_LANE: '/public/assets/terrain/carril_1.glb',
-
     TOWER_GLB_ALLY: '/public/assets/tower/tower1.glb',
     TOWER_GLB_ENEMY: '/public/assets/tower/tower2.glb',
     TOWER_GLB_HEIGHT: 2.8,
@@ -93,7 +90,6 @@ const CONFIG = {
     TOWER_GLB_SCALE_ENEMY: 1.3,
     TOWER_GLB_ROTATION_Y_ENEMY: Math.PI,
     TOWER_GLB_ROTATION_Y_ALLY: 0,
-
     NEXUS_GLB_ALLY: '/public/assets/nexus/nexus1.glb',
     NEXUS_GLB_ENEMY: '/public/assets/nexus/nexus2.glb',
     NEXUS_GLB_HEIGHT: 2.3,
@@ -101,7 +97,6 @@ const CONFIG = {
     NEXUS_GLB_SCALE_ENEMY: 0.85,
     NEXUS_GLB_ROTATION_Y_ALLY: 0,
     NEXUS_GLB_ROTATION_Y_ENEMY: Math.PI,
-
     SHOP_GLB_ALLY: '/public/assets/shop/shop1.glb',
     SHOP_GLB_ENEMY: '/public/assets/shop/shop2.glb',
     SHOP_GLB_HEIGHT: 1.3,
@@ -109,35 +104,21 @@ const CONFIG = {
     SHOP_GLB_SCALE_ENEMY: 1.0,
     SHOP_GLB_ROTATION_Y_ALLY: 0,
     SHOP_GLB_ROTATION_Y_ENEMY: 0,
-
     MINION_GLB_HEIGHT: 0.45,
     MINION_COLLISION_DISTANCE: 0.75,
 };
 
-// 🔧 FIX: Función auxiliar para resolver rutas de Axies
 function getAxieModelPath(axieData) {
     if (!axieData) return CONFIG.AXIES_BASE_PATH + 'bing.glb';
-    
-    // Si el modelo ya viene con ruta completa, usarlo
     if (axieData.modelo && axieData.modelo.startsWith('/')) {
-        // 🔧 FIX: Si tiene ruta vieja, redirigir a nueva carpeta
         if (axieData.modelo.includes('/axie-3d-assets/')) {
             const fileName = axieData.modelo.split('/').pop();
             return CONFIG.AXIES_BASE_PATH + fileName;
         }
         return axieData.modelo;
     }
-    
-    // Si solo viene el nombre, agregar la ruta base
-    if (axieData.modelo) {
-        return CONFIG.AXIES_BASE_PATH + axieData.modelo;
-    }
-    
-    // Fallback: usar id
-    if (axieData.id) {
-        return CONFIG.AXIES_BASE_PATH + axieData.id + '.glb';
-    }
-    
+    if (axieData.modelo) return CONFIG.AXIES_BASE_PATH + axieData.modelo;
+    if (axieData.id) return CONFIG.AXIES_BASE_PATH + axieData.id + '.glb';
     return CONFIG.AXIES_BASE_PATH + 'bing.glb';
 }
 
@@ -145,19 +126,13 @@ function clampMinionToLane(minion) {
     if (!minion || !minion.group) return;
     const limX = CONFIG.MINION_LANE_LIMIT_X;
     const limZ = CONFIG.MINION_LANE_LIMIT_Z;
-    
     if (minion.group.position.x > limX) minion.group.position.x = limX;
     else if (minion.group.position.x < -limX) minion.group.position.x = -limX;
-    
     if (minion.isEnemy) {
-        if (minion.group.position.z < CONFIG.MINION_MAX_Z_ENEMY) {
-            minion.group.position.z = CONFIG.MINION_MAX_Z_ENEMY;
-        }
+        if (minion.group.position.z < CONFIG.MINION_MAX_Z_ENEMY) minion.group.position.z = CONFIG.MINION_MAX_Z_ENEMY;
         if (minion.group.position.z > limZ) minion.group.position.z = limZ;
     } else {
-        if (minion.group.position.z > CONFIG.MINION_MAX_Z_ALLY) {
-            minion.group.position.z = CONFIG.MINION_MAX_Z_ALLY;
-        }
+        if (minion.group.position.z > CONFIG.MINION_MAX_Z_ALLY) minion.group.position.z = CONFIG.MINION_MAX_Z_ALLY;
         if (minion.group.position.z < -limZ) minion.group.position.z = -limZ;
     }
 }
@@ -251,11 +226,9 @@ let pauseMenu = null;
 let selectedAxieId = 'bestia';
 let axieLoaded = false;
 let currentAxieName = 'Bing';
-
 let potionHPCount = 0;
 let potionMPCount = 0;
 let potionUseCooldown = 0;
-
 let isAutoWalkingToShop = false;
 let autoWalkShopTarget = null;
 
@@ -667,7 +640,7 @@ const fillLight = new THREE.DirectionalLight(0x4488ff, 0.2);
 fillLight.position.set(-10, 10, -10);
 scene.add(fillLight);
 
-const laneLoader = new GLTFLoader();
+const laneLoader = sharedGLTFLoader;
 const LANE_PATH = CONFIG.TERRAIN_GLB_LANE;
 const LANE_TARGET_WIDTH = 10;
 const LANE_TARGET_LENGTH = 52;
@@ -701,19 +674,15 @@ function procesarLanes() {
     const largoAxis = dims[0].axis;
     const anchoAxis = dims[1].axis;
     const altoAxis = dims[2].axis;
-
     const scaleLargo = LANE_TARGET_LENGTH_EACH / dims[0].value;
     const scaleAncho = LANE_TARGET_WIDTH / dims[1].value;
     const scaleAlto = (scaleLargo + scaleAncho) / 4;
-
     const scaleMap = { x: 1, y: 1, z: 1 };
     scaleMap[largoAxis] = scaleLargo;
     scaleMap[anchoAxis] = scaleAncho;
     scaleMap[altoAxis] = scaleAlto;
-
     const rotacionY = (largoAxis === 'x') ? Math.PI / 2 : 0;
     const rotacionX = (largoAxis === 'y') ? -Math.PI / 2 : 0;
-
     let maxTopY = -Infinity;
 
     lanesData.forEach((data, idx) => {
@@ -803,7 +772,7 @@ class Nexus {
     }
 
     loadNexusGLB(isEnemy) {
-        const loader = new GLTFLoader();
+        const loader = sharedGLTFLoader;
         const path = isEnemy ? CONFIG.NEXUS_GLB_ENEMY : CONFIG.NEXUS_GLB_ALLY;
         const rY = isEnemy ? CONFIG.NEXUS_GLB_ROTATION_Y_ENEMY : CONFIG.NEXUS_GLB_ROTATION_Y_ALLY;
         const eq = isEnemy ? CONFIG.NEXUS_GLB_SCALE_ENEMY : CONFIG.NEXUS_GLB_SCALE_ALLY;
@@ -918,7 +887,7 @@ class Shop {
     }
 
     loadShopGLB(isEnemy) {
-        const loader = new GLTFLoader();
+        const loader = sharedGLTFLoader;
         const path = isEnemy ? CONFIG.SHOP_GLB_ENEMY : CONFIG.SHOP_GLB_ALLY;
         const rY = isEnemy ? CONFIG.SHOP_GLB_ROTATION_Y_ENEMY : CONFIG.SHOP_GLB_ROTATION_Y_ALLY;
         const eq = isEnemy ? CONFIG.SHOP_GLB_SCALE_ENEMY : CONFIG.SHOP_GLB_SCALE_ALLY;
@@ -1045,7 +1014,6 @@ function renderItems(container) {
     const items = Object.values(PLAYER_SHOP_CATALOG.items);
     const hasEmptySlot = playerItemSlots.some(s => s === null);
     const slotsUsed = playerItemSlots.filter(s => s !== null).length;
-    
     items.forEach(itemData => {
         const canAfford = playerGold >= itemData.cost;
         const canBuy = hasEmptySlot && canAfford;
@@ -1140,20 +1108,15 @@ function buyPotion(type) {
 function buyItem(itemId) {
     const itemData = PLAYER_SHOP_CATALOG.items[itemId];
     if (!itemData) return;
-    
     const emptySlotIndex = playerItemSlots.findIndex(s => s === null);
     if (emptySlotIndex === -1) {
         console.log('⛔ Inventario lleno (6/6 items)');
         return;
     }
-    
     if (!spendPlayerGold(itemData.cost)) { console.log(`⛔ Sin oro`); return; }
-    
     itemData.apply();
     playerItemSlots[emptySlotIndex] = { id: itemId, emoji: itemData.emoji, name: itemData.name, color: itemData.color };
-    
     console.log(`🛒 ${itemData.name} comprado → slot ${emptySlotIndex + 1}/6`);
-    
     updateItemHUD();
     renderShopContent();
     renderer.render(scene, camera);
@@ -1387,7 +1350,7 @@ class AxieTower {
     }
 
     loadTowerGLB(tier) {
-        const loader = new GLTFLoader();
+        const loader = sharedGLTFLoader;
         const path = this.isEnemy ? CONFIG.TOWER_GLB_ENEMY : CONFIG.TOWER_GLB_ALLY;
         const rY = this.isEnemy ? CONFIG.TOWER_GLB_ROTATION_Y_ENEMY : CONFIG.TOWER_GLB_ROTATION_Y_ALLY;
         const eq = this.isEnemy ? CONFIG.TOWER_GLB_SCALE_ENEMY : CONFIG.TOWER_GLB_SCALE_ALLY;
@@ -1680,7 +1643,10 @@ class Minion {
     }
 
     loadMinionGLB(tipo) {
-        const loader = new GLTFLoader();
+        const loader = sharedGLTFLoader;
+        const isMage = tipo === 'mage';
+        const targetHeight = isMage ? 0.65 : CONFIG.MINION_GLB_HEIGHT;
+
         loader.load(CONFIG.MINION_GLB_MAGE_ENEMY, (gltf) => {
             while (this.group.children.length > 0) this.group.remove(this.group.children[0]);
             const model = gltf.scene;
@@ -1688,12 +1654,14 @@ class Minion {
             const size = new THREE.Vector3();
             bbox.getSize(size);
             const curH = size.y > 0.0001 ? size.y : 1;
-            const sf = CONFIG.MINION_GLB_HEIGHT / curH;
+            const sf = targetHeight / curH;
             model.scale.setScalar(sf);
+
             const bbox2 = new THREE.Box3().setFromObject(model);
             model.position.y = -bbox2.min.y;
             model.position.x = -(bbox2.min.x + bbox2.max.x) / 2;
             model.position.z = -(bbox2.min.z + bbox2.max.z) / 2;
+
             model.traverse((n) => {
                 if (n.isMesh) { n.castShadow = false; n.receiveShadow = false; n.userData.targetRef = this; }
             });
@@ -1701,11 +1669,15 @@ class Minion {
             this.group.add(model);
             this.glbModel = model;
 
+            if (isMage) {
+                this.loadMageStaff(model);
+            }
+
             this.mixer = new THREE.AnimationMixer(model);
             this.actions = {};
             const walkPath = CONFIG.MAGE_GLB_WALK;
             if (walkPath) {
-                new GLTFLoader().load(walkPath, (walkGltf) => {
+                sharedGLTFLoader.load(walkPath, (walkGltf) => {
                     if (walkGltf.animations && walkGltf.animations[0]) {
                         const action = this.mixer.clipAction(walkGltf.animations[0]);
                         action.setLoop(THREE.LoopRepeat);
@@ -1719,7 +1691,7 @@ class Minion {
             const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
             const sprite = new THREE.Sprite(spriteMat);
             sprite.scale.set(0.7, 0.15, 1);
-            sprite.position.y = CONFIG.MINION_GLB_HEIGHT + 0.55;
+            sprite.position.y = targetHeight + 0.55;
             sprite.renderOrder = 999;
             this.group.add(sprite);
             this.spriteMat = spriteMat;
@@ -1733,6 +1705,53 @@ class Minion {
             sprite.renderOrder = 999;
             this.group.add(sprite);
             this.spriteMat = spriteMat;
+        });
+    }
+
+    loadMageStaff(mageModel) {
+        const loader = sharedGLTFLoader;
+        loader.load(CONFIG.MAGE_GLB_STAFF, (gltf) => {
+            const staff = gltf.scene;
+
+            const staffScale = 0.8;
+            staff.scale.setScalar(staffScale);
+
+            let handBone = null;
+            const possibleNames = [
+                'hand_R', 'RightHand', 'mixamorig:RightHand',
+                'Hand_R', 'right_hand', 'weapon_r', 'Weapon_R'
+            ];
+
+            mageModel.traverse((node) => {
+                if (node.isBone && possibleNames.some(name => node.name.includes(name))) {
+                    handBone = node;
+                }
+            });
+
+            if (handBone) {
+                handBone.add(staff);
+                staff.position.set(0, 0, 0);
+                staff.rotation.set(0, 0, 0);
+                console.log(`🧙 Staff adjuntado a hueso: ${handBone.name}`);
+                this.staff = staff;
+                this.staffBone = handBone;
+            } else {
+                console.warn('⚠️ Hueso mano derecha no encontrado, adjuntando al modelo raíz');
+                mageModel.add(staff);
+                staff.position.set(0.3, 0.4, 0.1);
+                staff.rotation.set(-Math.PI / 2, 0, 0);
+                this.staff = staff;
+            }
+
+            staff.traverse((n) => {
+                if (n.isMesh) {
+                    n.castShadow = false;
+                    n.receiveShadow = false;
+                    n.userData.targetRef = this;
+                }
+            });
+        }, undefined, (err) => {
+            console.warn('⚠️ No se pudo cargar mage2_staff.glb:', err.message);
         });
     }
 
@@ -1755,16 +1774,10 @@ class Minion {
 
     adjustWeightsOnKill(targetType) {
         const w = this.memory.weights;
-        if (targetType === 'player') { 
-            w.aggression += 0.2; 
-            w.focusPlayer += 0.25; 
-        }
+        if (targetType === 'player') { w.aggression += 0.2; w.focusPlayer += 0.25; }
         else if (targetType === 'minion') {
             w.focusMinions += 0.12;
-            if (this.memory.kills >= 3) { 
-                w.focusStructure += 0.15; 
-                w.focusMinions -= 0.05; 
-            }
+            if (this.memory.kills >= 3) { w.focusStructure += 0.15; w.focusMinions -= 0.05; }
         } 
         else if (targetType === 'tower' || targetType === 'nexus') { 
             w.focusStructure += 0.25; 
@@ -1825,9 +1838,7 @@ class Minion {
             if (ally.isDead) continue;
             if (ally.target && !ally.target.isDead) {
                 const attacker = ally.target;
-                if (attacker.group) {
-                    enemiesAttackingAllies.add(attacker);
-                }
+                if (attacker.group) enemiesAttackingAllies.add(attacker);
             }
         }
 
@@ -1859,10 +1870,7 @@ class Minion {
                 const dz = em.group.position.z - this.group.position.z;
                 const isAhead = this.isEnemy ? dz < 0 : dz > 0;
                 if (!isAhead && Math.abs(dz) > 3.0) continue;
-                if (dist < priority2Dist) {
-                    priority2Dist = dist;
-                    priority2Target = em;
-                }
+                if (dist < priority2Dist) { priority2Dist = dist; priority2Target = em; }
             }
         }
 
@@ -1879,10 +1887,7 @@ class Minion {
                 const tHP = tower.health / tower.maxHealth;
                 if (tHP < 0.5) score -= 10;
                 if (tHP < 0.3) score -= 20;
-                if (score < priority3Dist) {
-                    priority3Dist = score;
-                    priority3Target = tower;
-                }
+                if (score < priority3Dist) { priority3Dist = score; priority3Target = tower; }
             }
         }
 
@@ -1914,7 +1919,6 @@ class Minion {
         }
 
         const finalTarget = priority1Target || priority2Target || priority3Target || priority4Target || priority5Target;
-
         const DEPLOY_TRIGGER_DIST = CONFIG.DEPLOY_TRIGGER_DIST;
 
         if (finalTarget) {
@@ -1923,7 +1927,6 @@ class Minion {
             const dx = targetPos.x - this.group.position.x;
             const dz = targetPos.z - this.group.position.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
-
             this.group.rotation.y = Math.atan2(dx, dz);
 
             let attackRange = this.attackRange;
@@ -1939,13 +1942,9 @@ class Minion {
                 this.state = 'attack';
                 if (this.attackCooldown <= 0) {
                     registerFactionAttack(this.isEnemy ? 'enemy' : 'ally', finalTarget);
-                    
                     if (finalTarget._isAxie || finalTarget.type === 'player' || finalTarget.type === 'enemy_axie') {
-                        if (finalTarget.type === 'player') {
-                            playerTakeDamage(this.attackDamage);
-                        } else if (finalTarget.type === 'enemy_axie' && typeof enemyAxieTakeDamage === 'function') {
-                            enemyAxieTakeDamage(this.attackDamage);
-                        }
+                        if (finalTarget.type === 'player') playerTakeDamage(this.attackDamage);
+                        else if (finalTarget.type === 'enemy_axie' && typeof enemyAxieTakeDamage === 'function') enemyAxieTakeDamage(this.attackDamage);
                         this.attackCooldown = this.attackSpeed;
                     } else if (finalTarget.type === 'tower' || finalTarget.type === 'nexus') {
                         if (finalTarget.takeDamage) finalTarget.takeDamage(this.attackDamage);
@@ -1970,10 +1969,8 @@ class Minion {
             } else {
                 this.state = 'move';
                 const norm = dist > 0.1 ? dist : 1;
-                
                 this.group.position.z += (dz / norm) * this.speed * delta;
                 this.group.position.x += (dx / norm) * this.speed * delta;
-                
                 if (this.deployProgress > 0.01) {
                     const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
                     this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, 1.5 * this.deployProgress * delta);
@@ -2063,40 +2060,92 @@ function spawnWave() {
     const comp = getWaveComposition();
     waveDiv.textContent = `⚔️ OLEADA ${waveNumber}`;
 
-    const startZ = -13;
-    const ROW_SPACING = 1.2;
-    const mageSpacingSpawn = 1.0;
+    // 🎯 NUEVO: spawn junto al nexo con formación tipo LoL
+    const NEXUS_Z_ALLY = -21;
+    const NEXUS_Z_ENEMY = 21;
+    const LANE_X = 0;
+    const MELEE_ROWS = 2;
+    const MELEE_PER_ROW = 3;
+    const MAGE_ROWS = 1;
+    const MAGE_PER_ROW = 3;
+    const ROW_SPACING_Z = 1.3;
+    const COL_SPACING_X = 1.1;
 
     let queueIndex = 0;
 
-    for (let i = 0; i < comp.melee; i++) {
-        const z = startZ - i * ROW_SPACING;
-        spawnQueue.push({ team: 'ally', tipo: 'melee', index: i, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
-        queueIndex++;
+    // ALIADOS melee
+    for (let row = 0; row < MELEE_ROWS; row++) {
+        const z = NEXUS_Z_ALLY - row * ROW_SPACING_Z;
+        for (let col = 0; col < MELEE_PER_ROW; col++) {
+            if (row * MELEE_PER_ROW + col >= comp.melee) break;
+            const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
+            spawnQueue.push({
+                team: 'ally', tipo: 'melee',
+                index: queueIndex,
+                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                x, z,
+                formationRow: row,
+                formationCol: col
+            });
+            queueIndex++;
+        }
     }
 
-    const mageStartZ = startZ - comp.melee * ROW_SPACING - 1.0;
-    for (let i = 0; i < comp.mage; i++) {
-        let z = mageStartZ - i * mageSpacingSpawn;
-        z = Math.max(-CONFIG.MINION_LANE_LIMIT_Z + 0.5, Math.min(CONFIG.MINION_LANE_LIMIT_Z - 0.5, z));
-        spawnQueue.push({ team: 'ally', tipo: 'mage', index: i + comp.melee, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
-        queueIndex++;
+    // ALIADOS mage
+    for (let row = 0; row < MAGE_ROWS; row++) {
+        const z = NEXUS_Z_ALLY - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
+        for (let col = 0; col < MAGE_PER_ROW; col++) {
+            if (row * MAGE_PER_ROW + col >= comp.mage) break;
+            const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
+            spawnQueue.push({
+                team: 'ally', tipo: 'mage',
+                index: queueIndex,
+                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                x, z,
+                formationRow: row + MELEE_ROWS,
+                formationCol: col
+            });
+            queueIndex++;
+        }
     }
 
-    for (let i = 0; i < comp.melee; i++) {
-        const z = -(startZ - i * ROW_SPACING);
-        spawnQueue.push({ team: 'enemy', tipo: 'melee', index: i, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
-        queueIndex++;
+    // ENEMIGOS melee
+    for (let row = 0; row < MELEE_ROWS; row++) {
+        const z = NEXUS_Z_ENEMY + row * ROW_SPACING_Z;
+        for (let col = 0; col < MELEE_PER_ROW; col++) {
+            if (row * MELEE_PER_ROW + col >= comp.melee) break;
+            const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
+            spawnQueue.push({
+                team: 'enemy', tipo: 'melee',
+                index: queueIndex,
+                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                x, z,
+                formationRow: row,
+                formationCol: col
+            });
+            queueIndex++;
+        }
     }
 
-    for (let i = 0; i < comp.mage; i++) {
-        let z = -(mageStartZ - i * mageSpacingSpawn);
-        z = Math.max(-CONFIG.MINION_LANE_LIMIT_Z + 0.5, Math.min(CONFIG.MINION_LANE_LIMIT_Z - 0.5, z));
-        spawnQueue.push({ team: 'enemy', tipo: 'mage', index: i + comp.melee, delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY, z });
-        queueIndex++;
+    // ENEMIGOS mage
+    for (let row = 0; row < MAGE_ROWS; row++) {
+        const z = NEXUS_Z_ENEMY + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
+        for (let col = 0; col < MAGE_PER_ROW; col++) {
+            if (row * MAGE_PER_ROW + col >= comp.mage) break;
+            const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
+            spawnQueue.push({
+                team: 'enemy', tipo: 'mage',
+                index: queueIndex,
+                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                x, z,
+                formationRow: row + MELEE_ROWS,
+                formationCol: col
+            });
+            queueIndex++;
+        }
     }
 
-    console.log(`🌊 [t=${gameTime.toFixed(2)}s] Oleada ${waveNumber}: ${comp.melee} melee + ${comp.mage} mage por equipo (spawn 1s escalonado)`);
+    console.log(`🌊 [t=${gameTime.toFixed(2)}s] Oleada ${waveNumber}: ${comp.melee} melee + ${comp.mage} mage por equipo (formación desde nexos)`);
 
     waveNumber++;
     waveCooldown = 0;
@@ -2109,17 +2158,17 @@ function processSpawnQueue(delta) {
         const item = spawnQueue[i];
         if (spawnQueueTimer >= item.delay) {
             if (item.team === 'ally') {
-                const m = new Minion(0, item.z, false, item.tipo, item.index);
+                const m = new Minion(item.x, item.z, false, item.tipo, item.index);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 aliados.push(m);
             } else {
-                const m = new Minion(0, item.z, true, item.tipo, item.index);
+                const m = new Minion(item.x, item.z, true, item.tipo, item.index);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 enemigos.push(m);
             }
-            console.log(`👾 [t=${gameTime.toFixed(2)}s] Spawn: ${item.team} ${item.tipo} #${item.index + 1}`);
+            console.log(`👾 [t=${gameTime.toFixed(2)}s] Spawn: ${item.team} ${item.tipo} #${item.index + 1} en (${item.x.toFixed(1)}, ${item.z.toFixed(1)})`);
             spawnQueue.splice(i, 1);
         }
     }
@@ -2171,8 +2220,7 @@ function loadSelectedAxie(axieId) {
     return new Promise((resolve) => {
         const axieData = getAxieById(axieId);
         if (!axieData) { loadDefaultAxie().then(resolve); return; }
-        const loader = new GLTFLoader();
-        // 🔧 FIX: resolver ruta con función auxiliar
+        const loader = sharedGLTFLoader;
         const modelPath = getAxieModelPath(axieData);
         console.log(`🦊 Cargando Axie: ${axieData.nombre} desde ${modelPath}`);
         loader.load(modelPath, (gltf) => {
@@ -2205,8 +2253,7 @@ function loadSelectedAxie(axieId) {
 
 function loadDefaultAxie() {
     return new Promise((resolve) => {
-        const loader = new GLTFLoader();
-        // 🔧 FIX: ruta nueva de Axies
+        const loader = sharedGLTFLoader;
         const defaultPath = CONFIG.AXIES_BASE_PATH + 'bing.glb';
         console.log(`🦊 Cargando Axie por defecto: ${defaultPath}`);
         loader.load(defaultPath, (gltf) => {
@@ -2385,25 +2432,20 @@ function usePotion(type) {
     if (type === 'hp') {
         if (potionHPCount <= 0) { console.log('⛔ Sin pociones HP'); return; }
         if (playerHealth >= playerMaxHealth) { console.log('⛔ HP lleno'); return; }
-        
         potionHPCount--;
         playerHealth = Math.min(playerMaxHealth, playerHealth + 50);
         potionUseCooldown = CONFIG.POTION_USE_COOLDOWN;
         console.log(`💊 Poción HP usada (+50) | HP: ${Math.floor(playerHealth)}/${playerMaxHealth} | Quedan: ${potionHPCount}`);
-        
         flashPotionHUD('hp');
     } else if (type === 'mp') {
         if (potionMPCount <= 0) { console.log('⛔ Sin pociones MP'); return; }
         if (playerMana >= playerMaxMana) { console.log('⛔ MP lleno'); return; }
-        
         potionMPCount--;
         playerMana = Math.min(playerMaxMana, playerMana + 50);
         potionUseCooldown = CONFIG.POTION_USE_COOLDOWN;
         console.log(`💧 Poción MP usada (+50) | MP: ${Math.floor(playerMana)}/${playerMaxMana} | Quedan: ${potionMPCount}`);
-        
         flashPotionHUD('mp');
     }
-    
     updatePlayerHUD();
     updatePotionHUD();
 }
@@ -2565,8 +2607,7 @@ function spawnEnemyAxie() {
     enemyAxiePotionCount = 0;
     enemyAxiePotionCooldown = 0;
     
-    const loader = new GLTFLoader();
-    // 🔧 FIX: resolver ruta con función auxiliar
+    const loader = sharedGLTFLoader;
     const modelPath = getAxieModelPath(randomAxie);
     console.log(`🤖 Cargando Axie enemigo: ${randomAxie.nombre} desde ${modelPath}`);
     loader.load(modelPath, (gltf) => {
@@ -2901,7 +2942,6 @@ function updateEnemyAxie(delta) {
                     enemyAxieModel.position.x += (rdx / rdist) * ms;
                     enemyAxieModel.position.z += (rdz / rdist) * ms;
                     enemyAxieModel.rotation.y = Math.atan2(rdx, rdz);
-                    
                     if (enemyAxieCurrentAnim !== 'walk' && enemyAxieAnimWalk) {
                         if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
                         enemyAxieAnimWalk.play();
@@ -2940,11 +2980,7 @@ function updateEnemyAxie(delta) {
                 playerModel.position.z - enemyAxieModel.position.z
             );
             if (enemyAxieAttackCooldown <= 0) {
-                enemyAxieAttack({
-                    type: 'player',
-                    isDead: false,
-                    ref: { group: playerModel, type: 'player' }
-                });
+                enemyAxieAttack({ type: 'player', isDead: false, ref: { group: playerModel, type: 'player' } });
                 enemyAxieAttackCooldown = ENEMY_AXIE_ATTACK_SPEED;
             }
             if (enemyAxieCurrentAnim !== 'idle' && enemyAxieAnimIdle) {
@@ -3462,7 +3498,7 @@ let mouseDownPos = { x: 0, y: 0 };
 
 function isEnemyForPlayer(entity) {
     if (!entity) return false;
-    if (entity.type === 'shop') return entity.isEnemy === true;
+    if (entity.type === 'shop') return false;
     if (entity.type === 'enemy_axie') return true;
     if (entity.type === 'minion' && entity.isEnemy === true) return true;
     if (entity.type === 'tower' && entity.isEnemy === true) return true;
@@ -3584,7 +3620,7 @@ renderer.domElement.addEventListener('mouseup', (e) => {
             window.showTarget(target);
             
             const targetPos = target.group ? target.group.position : target.position;
-            if (targetPos) {
+            if (targetPos && target.type !== 'shop') {
                 const isEnemy = isEnemyForPlayer(target);
                 const stopDistance = isEnemy ? Math.max(1.5, attackRange - 0.5) : 2.0;
                 const dx = targetPos.x - playerModel.position.x;
@@ -3722,6 +3758,15 @@ function abandonGame() {
     playerAIPotionCooldown = 0;
     enemyAxieRetreatCooldown = 0;
     resetEnemyAxie();
+    stopGameLoop();
+    if (timerDiv) timerDiv.style.display = 'none';
+    if (fpsDiv) fpsDiv.style.display = 'none';
+    if (waveDiv) waveDiv.style.display = 'none';
+    if (targetUI) targetUI.style.display = 'none';
+    for (const t of towers) {
+        for (const p of t.projectiles) { p.active = false; if (p.mesh && p.mesh.parent) scene.remove(p.mesh); }
+        t.projectiles = [];
+    }
     if (renderer) renderer.domElement.style.display = 'none';
     showMainMenu();
 }
@@ -3881,9 +3926,11 @@ async function startAIGame(axieId) {
     mostrarPantallaCarga();
     actualizarPantallaCarga(5, 'Iniciando entrenamiento...');
     if (menuScreen) { menuScreen.destroy(); menuScreen = null; }
+    let loadWaitGuard = 0;
     while (!groundReady || !nexusAliado || !nexusEnemigo || towers.length === 0 || !shopAliada || !shopEnemiga) {
         actualizarPantallaCarga(15, 'Cargando...');
         await new Promise(r => setTimeout(r, 100));
+        if (++loadWaitGuard > 150) { console.error('❌ Timeout esperando el escenario'); break; }
     }
     actualizarPantallaCarga(60, 'Cargando Axie...');
     await loadSelectedAxie(axieId);
@@ -3925,6 +3972,10 @@ async function startAIGame(axieId) {
     playerAIPotionCount = 0;
     playerAIPotionCooldown = 0;
     playerDeathCount = 0;
+    playerSpeed = CONFIG.axieSpeed;
+    attackDamage = CONFIG.attackDamage;
+    attackRange = CONFIG.attackRange;
+    attackSpeed = CONFIG.attackSpeed;
     shopAutoOpenCooldown = 0;
     spawnQueue.length = 0;
     spawnQueueTimer = 0;
@@ -3981,8 +4032,7 @@ async function startAIGame(axieId) {
         if (!enemyAxieSpawned) spawnEnemyAxie();
     }, CONFIG.AXIE_SPAWN_TIME * 1000);
     updateHUDEntrenamiento();
-    lastTime = performance.now();
-    requestAnimationFrame(gameLoop);
+    startGameLoop();
 }
 
 async function startGame(axieId) {
@@ -3991,9 +4041,11 @@ async function startGame(axieId) {
     if (menuScreen) { menuScreen.destroy(); menuScreen = null; }
     isAITrainingMode = false;
     console.log('🎮 Modo: JUGADOR HUMANO');
+    let loadWaitGuard = 0;
     while (!groundReady || !nexusAliado || !nexusEnemigo || towers.length === 0 || !shopAliada || !shopEnemiga) {
         actualizarPantallaCarga(15, 'Cargando...');
         await new Promise(r => setTimeout(r, 100));
+        if (++loadWaitGuard > 150) { console.error('❌ Timeout esperando el escenario'); break; }
     }
     actualizarPantallaCarga(60, 'Cargando Axie...');
     await loadSelectedAxie(axieId);
@@ -4016,6 +4068,10 @@ async function startGame(axieId) {
     playerRespawnTimer = 0;
     resetPlayerEconomy();
     playerDeathCount = 0;
+    playerSpeed = CONFIG.axieSpeed;
+    attackDamage = CONFIG.attackDamage;
+    attackRange = CONFIG.attackRange;
+    attackSpeed = CONFIG.attackSpeed;
     shopAutoOpenCooldown = 0;
     spawnQueue.length = 0;
     spawnQueueTimer = 0;
@@ -4026,6 +4082,7 @@ async function startGame(axieId) {
     for (const m of aliados) if (m.group && m.group.parent) scene.remove(m.group);
     for (const m of enemigos) if (m.group && m.group.parent) scene.remove(m.group);
     aliados.length = 0; enemigos.length = 0;
+    resetEnemyAxie();
     inicializarCamaraFija();
     if (!playerHUD) { createPlayerHUD(); updatePlayerHUD(); }
     updateItemHUD();
@@ -4056,8 +4113,7 @@ async function startGame(axieId) {
         }
         if (!enemyAxieSpawned) spawnEnemyAxie();
     }, CONFIG.AXIE_SPAWN_TIME * 1000);
-    lastTime = performance.now();
-    requestAnimationFrame(gameLoop);
+    startGameLoop();
 }
 
 document.addEventListener('keydown', (e) => {
@@ -4073,11 +4129,24 @@ document.addEventListener('keydown', (e) => {
 
 let frameCounter = 0;
 let lastTime = 0;
+let gameLoopToken = 0;
+
+function startGameLoop() {
+    gameLoopToken++;
+    const token = gameLoopToken;
+    lastTime = performance.now();
+    requestAnimationFrame((t) => gameLoop(t, token));
+}
+
+function stopGameLoop() {
+    gameLoopToken++;
+}
 let realFPS = 0;
 let fpsCounter = 0;
 let fpsTimer = 0;
 
-function gameLoop(time) {
+function gameLoop(time, token) {
+    if (token !== gameLoopToken) return;
     if (isAITrainingMode && aiTrainingAutoRestartTimer > 0) {
         const delta = Math.min((time - lastTime) / 1000, 0.05);
         lastTime = time;
@@ -4096,20 +4165,20 @@ function gameLoop(time) {
             return;
         }
         renderer.render(scene, camera);
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame((t) => gameLoop(t, token));
         return;
     }
     if (gameFinished) {
         if (nexusEnemigo) nexusEnemigo.updateExplosion(0.016);
         if (nexusAliado) nexusAliado.updateExplosion(0.016);
         renderer.render(scene, camera);
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame((t) => gameLoop(t, token));
         return;
     }
     if (gamePaused) {
         lastTime = time;
         renderer.render(scene, camera);
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame((t) => gameLoop(t, token));
         return;
     }
     const delta = Math.min((time - lastTime) / 1000, 0.05);
@@ -4284,7 +4353,7 @@ function gameLoop(time) {
             updateDynamicHUDForCamera();
         } else { if (playerModel) updateCameraPosition(); if (camaraInicializada) camera.position.y = CAMERA_FIXED_Y; }
         renderer.render(scene, camera);
-        requestAnimationFrame(gameLoop);
+        requestAnimationFrame((t) => gameLoop(t, token));
         return;
     }
 
@@ -4313,7 +4382,7 @@ function gameLoop(time) {
         if (camaraInicializada) camera.position.y = CAMERA_FIXED_Y;
     }
     renderer.render(scene, camera);
-    requestAnimationFrame(gameLoop);
+    requestAnimationFrame((t) => gameLoop(t, token));
 }
 
 window.addEventListener('resize', () => {
@@ -4378,8 +4447,27 @@ window.updateTargetUI = function () {
     else if (window.currentTarget) { window.currentTarget = null; targetUI.style.display = 'none'; }
 };
 
+// 🔧 CORRECCIÓN 2: Precalienta todas las combinaciones de health bars al inicio
+function precalentarHealthBars() {
+    const combinaciones = [
+        { segments: 6, isEnemy: false },
+        { segments: 6, isEnemy: true },
+        { segments: 3, isEnemy: false },
+        { segments: 3, isEnemy: true },
+        { segments: 10, isEnemy: false },
+        { segments: 10, isEnemy: true },
+    ];
+    for (const { segments, isEnemy } of combinaciones) {
+        for (let v = 0; v <= segments; v++) {
+            getHealthBarTexture(segments, v, isEnemy);
+        }
+    }
+    console.log(`✅ HealthBars precalentadas: ${healthBarCache.size} texturas`);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadBrains();
+    precalentarHealthBars();
     const loading = document.getElementById('loading');
     if (loading) loading.style.display = 'none';
     timerDiv.style.display = 'none';
@@ -4390,5 +4478,6 @@ document.addEventListener('DOMContentLoaded', () => {
     enemyAxieDebugHUD.style.display = 'none';
     showMainMenu();
 });
+
 import './js/hub-control.js';
 import './js/inject-memory.js';

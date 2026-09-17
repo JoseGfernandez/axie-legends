@@ -1,0 +1,91 @@
+Necesito ayuda con 3 mejoras específicas para mi MOBA en Three.js. Ya apliqué otros cambios, así que NO toques: spawn desde nexo, tamaño/arma del mage, ni el sistema de brains existente. Solo enfócate en lo que pido abajo.
+
+## CONTEXTO DEL CÓDIGO (ya está aplicado)
+- Los minions ya spawnean desde los nexos (z=-21 aliado, z=21 enemigo) con formación LoL en 2 filas
+- El mage tiene arma (mage2_staff.glb) adjuntada a la mano derecha
+- Los brains (factionBrain y enemyAxieBrain) se guardan en localStorage pero NO se actualizan según victorias/derrotas reales
+
+## PUNTO 1: CARRIL ESTRICTO + 2 FILAS + REAGRUPACIÓN
+
+Problema: los minions se salen momentáneamente del carril (x > 2), se amontonan, y no se reagrupan si quedan pocos.
+
+Necesito:
+A) Modificar `clampMinionToLane()` para que use THREE.MathUtils.clamp (más estricto)
+B) Nueva función `getFormationPosition(minion, targetPos, allies)` que:
+   - Cuente aliados vivos del mismo tipo en el carril
+   - Si hay más de 4 del mismo tipo → 2 filas (3 por fila)
+   - Si hay 4 o menos → 1 fila
+   - Melee: fila delantera, offset X de ±1.1 entre minions
+   - Mage: detrás de melee, offset Z de -2.5, offset X de ±1.2
+   - Siempre clamp x entre -2 y 2
+C) En `Minion.update()`, cuando hay `finalTarget`, calcular posición de formación y moverse hacia ella en vez de hacia el target directo. Aplicar `clampMinionToLane()` cada frame al final.
+
+Dame el código exacto de las 3 partes.
+
+## PUNTO 2: IA ENEMIGA ADAPTATIVA
+
+Problema: la IA enemiga usa pesos estáticos. No se adapta a la situación de la partida.
+
+Necesito modificar `findBestEnemyTarget()` para que ANTES de decidir, calcule pesos efectivos (no mutando los guardados) según:
+- `advantageRatio = myAlliesAlive / enemiesAlive`
+- `playerFed = playerHealth/playerMaxHealth > 0.7 && playerKillStreak > 2`
+- `losingBadly = advantageRatio < 0.5 && hpPct < 0.5`
+- `winningBig = advantageRatio > 1.5 && hpPct > 0.6`
+
+Pesos efectivos:
+- effAggression = w.aggression * (winningBig ? 1.5 : losingBadly ? 0.5 : 1.0)
+- effCaution = w.caution * (losingBadly ? 1.8 : winningBig ? 0.6 : 1.0)
+- effFocusPlayer = w.focusPlayer * (playerFed ? 2.0 : 1.0)
+- effGroupBehavior = w.groupBehavior * (myAlliesAlive > 3 ? 1.3 : 1.0)
+
+Usar estos pesos efectivos en los cálculos de score. Misma lógica de candidatos (minions, player, towers, defensa, nexus), pero con los pesos adaptados. Dame la función completa.
+
+## PUNTO 3: IA QUE APRENDE DE VERDAD
+
+Problema: los brains se guardan pero nunca se actualizan según victorias/derrotas de partidas completas.
+
+Necesito:
+A) En `handleAITrainingMatchEnd(result)`:
+   - Si result === 'victory' (aliados ganaron):
+     * factionBrain.ally.weights.aggression += 0.05
+     * factionBrain.ally.weights.focusStructure += 0.05
+     * factionBrain.enemy.weights.caution += 0.08
+     * enemyAxieBrain.weights.caution += 0.05
+   - Si result === 'defeat' (enemigos ganaron):
+     * factionBrain.enemy.weights.aggression += 0.05
+     * factionBrain.enemy.weights.focusStructure += 0.05
+     * factionBrain.ally.weights.caution += 0.08
+     * enemyAxieBrain.weights.aggression += 0.05
+   - Aplicar clampWeights() después
+   - saveBrains()
+   - Log: `🧠 Brains evolucionados: victoria/derrota | Aliado aggro=X.XX | Enemigo aggro=X.XX`
+
+B) En `evaluateWaveOutcome()` (fin de oleada), refuerzo más fuerte:
+   - Si aa > ae (aliados ganan oleada): ally.aggression += 0.15, enemy.caution += 0.20
+   - Si ae > aa: enemy.aggression += 0.15, ally.caution += 0.20
+   - (esto reemplaza el 0.1/0.15 actual)
+
+C) En `startAIGame()` al iniciar:
+   - Después de `loadBrains()`, log los pesos actuales:
+     * `🧠 Pesos cargados - Aliado: aggro=${...} caution=${...}`
+     * `🧠 Pesos cargados - Enemigo: aggro=${...} caution=${...}`
+
+D) Nueva función global `window.resetBrainsAndReload()`:
+   - Limpia localStorage (axie_factionBrain, axie_enemyAxieBrain)
+   - Resetea los objetos factionBrain y enemyAxieBrain a valores por defecto
+   - console.log('🧠 Brains reseteados a valores por defecto')
+   - Útil para testing
+
+Dame el código exacto de cada parte.
+
+## FORMATO DE RESPUESTA
+
+Para cada punto:
+1. Diagnóstico breve (qué está mal en el código actual)
+2. Código exacto listo para pegar
+3. Dónde va exactamente (nombre de función, línea aproximada)
+4. Test para verificar que funciona
+
+NO refactorizaciones masivas. Solo cambios quirúrgicos sobre las funciones existentes.
+Responde en español, código comentado en español.
+No repitas el código que no cambia, solo lo que se modifica.

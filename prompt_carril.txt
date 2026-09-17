@@ -1,0 +1,15 @@
+Modifica 3 partes de mi main.js para que los minions respeten el carril estrictamente y se separen en 2 filas cuando hay muchos. NO toques nada más.
+
+CAMBIO 1: Reemplaza la función `clampMinionToLane()` completa por una versión que use THREE.MathUtils.clamp (más estricta, sin if/else).
+
+CAMBIO 2: Agrega una nueva función `getFormationPosition(minion, targetPos, allies)` que:
+- Cuente aliados vivos del mismo tipo (melee/mage) en el carril
+- Si hay > 4 del mismo tipo → 2 filas de 3
+- Si hay ≤ 4 → 1 fila
+- Melee: fila delantera, offset X ±1.1
+- Mage: detrás de melee, offset Z -2.5, offset X ±1.2
+- Siempre clamp x entre -2 y 2 con THREE.MathUtils.clamp
+
+CAMBIO 3: Dentro de `Minion.update()`, en el bloque `if (finalTarget) { ... }`, reemplaza el movimiento actual para que use `getFormationPosition()` y aplique `clampMinionToLane(this)` al final de cada frame.
+
+Dame SOLO los 3 fragmentos de código exactos, listos para pegar. Sin explicaciones largas. Responde en español.

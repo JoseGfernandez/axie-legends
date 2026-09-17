@@ -1,4 +1,4 @@
-// =============================================
+﻿// =============================================
 // PANTALLA DE INICIO - SELECCIÓN DE AXIE
 // =============================================
 
@@ -24,7 +24,7 @@ export class MenuScreen {
             left: 0;
             width: 100%;
             height: 100%;
-            background: url('/assets/Axie Legends.jpg') center/cover no-repeat;
+            background: url('${import.meta.env.BASE_URL}assets/Axie Legends.jpg') center/cover no-repeat;
             display: flex;
             flex-direction: column;
             justify-content: center;

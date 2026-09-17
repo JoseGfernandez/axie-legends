@@ -1,0 +1,26 @@
+Modifica 4 partes de mi main.js para que la IA aprenda de victorias/derrotas reales.
+
+CAMBIO 1: En `handleAITrainingMatchEnd(result)`:
+- Si result === 'victory' (aliados ganaron):
+  * factionBrain.ally.weights.aggression += 0.05
+  * factionBrain.ally.weights.focusStructure += 0.05
+  * factionBrain.enemy.weights.caution += 0.08
+  * enemyAxieBrain.weights.caution += 0.05
+- Si result === 'defeat' (enemigos ganaron):
+  * factionBrain.enemy.weights.aggression += 0.05
+  * factionBrain.enemy.weights.focusStructure += 0.05
+  * factionBrain.ally.weights.caution += 0.08
+  * enemyAxieBrain.weights.aggression += 0.05
+- clampWeights() después
+- saveBrains()
+- console.log con los nuevos valores
+
+CAMBIO 2: En `evaluateWaveOutcome()`, cambia el refuerzo actual:
+- Si aa > ae: ally.aggression += 0.15, enemy.caution += 0.20
+- Si ae > aa: enemy.aggression += 0.15, ally.caution += 0.20
+
+CAMBIO 3: En `startAIGame()`, después de `loadBrains()`, agrega logs de los pesos cargados.
+
+CAMBIO 4: Nueva función global `window.resetBrainsAndReload()` que limpie localStorage y resetee brains a valores por defecto.
+
+Dame SOLO los 4 fragmentos exactos. Responde en español.

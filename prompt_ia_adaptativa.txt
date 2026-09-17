@@ -1,0 +1,17 @@
+Reemplaza la función `findBestEnemyTarget()` completa en mi main.js para que la IA enemiga adapte sus pesos según la situación de la partida.
+
+ANTES de calcular candidatos, calcula pesos efectivos (no mutando los guardados):
+- advantageRatio = myAlliesAlive / enemiesAlive
+- playerFed = playerHealth/playerMaxHealth > 0.7 && playerKillStreak > 2
+- losingBadly = advantageRatio < 0.5 && hpPct < 0.5
+- winningBig = advantageRatio > 1.5 && hpPct > 0.6
+
+Pesos efectivos:
+- effAggression = w.aggression * (winningBig ? 1.5 : losingBadly ? 0.5 : 1.0)
+- effCaution = w.caution * (losingBadly ? 1.8 : winningBig ? 0.6 : 1.0)
+- effFocusPlayer = w.focusPlayer * (playerFed ? 2.0 : 1.0)
+- effGroupBehavior = w.groupBehavior * (myAlliesAlive > 3 ? 1.3 : 1.0)
+
+Usa estos pesos en los scores. Misma lógica de candidatos (minions, player, towers, defensa, nexus).
+
+Dame SOLO la función completa lista para pegar. Responde en español.

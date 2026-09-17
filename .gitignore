@@ -1,25 +1,23 @@
-﻿# Dependencias
+# API Keys
+.env
+.env.local
+.env.*.local
+config-api.js
+*.key
+*.secret
+
+# Node
 node_modules/
 package-lock.json
+yarn.lock
 
-# Archivos de sistema
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Archivos de respaldo
-*.log
-*.tmp
-*.bak
-*.backup
-*.old
-
-# Editor
-.vscode/
-.idea/
-
-# Otros
+# Build
 dist/
 build/
-*.zip
-*.rar
+
+# Backups
+_backups/
+
+# IDE
+.vscode/
+.idea/

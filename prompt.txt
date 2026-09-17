@@ -1,0 +1,56 @@
+Necesito un análisis técnico y propuestas de código concreto para mejorar mi juego MOBA en Three.js. Adjunto mi main.js completo.
+
+## Contexto del juego
+- MOBA 1v1 con IA vs IA y modo humano vs IA
+- Dos equipos con nexus, 2 torres cada uno, tienda, minions melee y mage
+- Los Axies son héroes que compran items y usan pociones
+- El sistema de "brains" aprende pesos entre partidas (localStorage)
+
+## Problemas a resolver
+
+### 1. SPAWN DE MINIONS DESDE EL NEXO
+Actualmente spawnean en z=-13 (aliados) y z=13 (enemigos). Quiero:
+- Spawn JUNTO AL NEXO (z=-21 aliado, z=21 enemigo)
+- Caminen en formación ordenada por el carril (x cercano a 0)
+- Mantengan separación entre ellos
+- Formación tipo LoL: melee adelante, mage atrás
+
+### 2. IA ENEMIGA MÁS COMPETITIVA
+- Que adapte comportamiento: si pierde → defensiva y agrupa; si gana → agresiva
+- Si el jugador está fed → focus fire sobre él
+- Use mejor la tienda (priorice items según situación)
+- Coordine con sus minions
+
+### 3. MODO IA vs IA QUE APRENDA DE VERDAD
+- Pesos de brains cambien según victorias/derrotas
+- Aliada y enemiga evolucionen con cada partida
+- Al inicio cargue pesos guardados
+- Ver en consola cómo evolucionan
+- Decisiones tácticas basadas en pesos
+- Guardar "mejores builds" por Axie
+
+### 4. MINIONS MAGE2: TAMAÑO Y ARMA
+- Mage2 se ven muy pequeños vs melee
+- Ajustar escala para ser visualmente coherente
+- Cargar y adjuntar el arma mage2_staff.glb al mage en la mano derecha
+- Arma visible en todas las animaciones
+- Usar mage2_bone.glb + arma como child
+
+Ruta del arma: /public/assets/weapons_minions/mage2_staff.glb
+
+### 5. RESPETO DE CARRILES
+- Minions respeten estrictamente x entre -2 y 2
+- Separen en 2 filas si hay muchos
+- Al encontrar enemigo, se detengan y ataquen sin salirse
+- Se reagrupen si quedan pocos
+
+## Lo que necesito
+1. Diagnóstico técnico de cada problema
+2. Código concreto para cada punto, listo para pegar
+3. Orden de implementación
+4. Tests para verificar
+5. Advertencias de efectos secundarios
+
+NO refactorizaciones masivas. Solo cambios quirúrgicos. Si tocas varias funciones, dame el diff exacto (función vieja → función nueva).
+
+Responde en español, código comentado en español.
