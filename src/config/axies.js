@@ -1,7 +1,13 @@
 ﻿// =============================================
 // CONFIGURACIÓN DE AXIES (7 TIPOS CON ESCALAS)
 // =============================================
-import { getAssetUrl } from '../../assetHelper.js';
+// Función auxiliar integrada para evitar problemas de rutas con Rollup
+function getAssetUrl(path) {
+    const base = import.meta.env.BASE_URL || '/';
+    const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+    const cleanBase = base.endsWith('/') ? base : base + '/';
+    return cleanBase + cleanPath;
+}
 
 export const AXIE_TYPES = {
     BING: 'bing',
