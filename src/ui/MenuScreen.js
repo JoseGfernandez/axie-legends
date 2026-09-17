@@ -3,6 +3,7 @@
 // =============================================
 
 import { getAllAxies } from '../config/axies.js';
+import { getAssetUrl } from '../assetHelper.js';
 
 export class MenuScreen {
     constructor() {
@@ -23,8 +24,8 @@ export class MenuScreen {
             top: 0;
             left: 0;
             width: 100%;
-            height: '100%',
-            background: `url(${import.meta.env.BASE_URL}assets/Axie%20Legends.jpg) center/cover no-repeat`,
+            height: 100%;
+            background: url(${getAssetUrl('assets/Axie%20Legends.jpg')}) center/cover no-repeat;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -247,7 +248,6 @@ export class MenuScreen {
         const btn = document.createElement('button');
         btn.className = isDisabled ? 'btn-5v5' : 'menu-play-btn';
         
-        // 🔹 Si es el botón "5 vs 5", usar estilo más visible
         if (isDisabled) {
             btn.style.cssText = `
                 padding: 10px 30px;
@@ -355,6 +355,3 @@ export class MenuScreen {
 }
 
 export default MenuScreen;
-
-
-
