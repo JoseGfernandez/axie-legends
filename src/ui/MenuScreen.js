@@ -24,7 +24,7 @@ export class MenuScreen {
             left: 0;
             width: 100%;
             height: 100%;
-            background: url(`${import.meta.env.BASE_URL}assets/Axie%20Legends.jpg`) center/cover no-repeat;
+            element.style.background = `url(${import.meta.env.BASE_URL}assets/Axie%20Legends.jpg) center/cover no-repeat`;
             display: flex;
             flex-direction: column;
             justify-content: center;
