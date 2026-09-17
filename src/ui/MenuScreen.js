@@ -27,7 +27,7 @@ export class MenuScreen {
             left: 0;
             width: 100%;
             height: 100%;
-            background: url('${baseUrl}assets/Axie%20Legends.jpg') center/cover no-repeat;
+            background: url('${baseUrl}assets/fondos/fondo-inicio.jpg') center/cover no-repeat;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -39,7 +39,7 @@ export class MenuScreen {
             animation: menuFadeIn 0.6s ease-out;
         `;
 
-        // Overlay oscuro
+        // Overlay oscuro para que resalten los elementos
         const overlay = document.createElement('div');
         overlay.style.cssText = `
             position: absolute;
@@ -47,7 +47,7 @@ export class MenuScreen {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.40);
+            background: rgba(0, 0, 0, 0.45);
             z-index: 1;
         `;
         this.container.appendChild(overlay);
