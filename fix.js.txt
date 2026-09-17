@@ -1,0 +1,40 @@
+const fs = require('fs');
+const path = require('path');
+
+function walkDir(dir) {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+        const filePath = path.join(dir, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isDirectory()) {
+            walkDir(filePath);
+        } else if (file.endsWith('.js')) {
+            processFile(filePath);
+        }
+    }
+}
+
+function processFile(filePath) {
+    let content = fs.readFileSync(filePath, 'utf8');
+    let original = content;
+
+    if (content.includes('assets/')) {
+        if (!content.includes('assetHelper')) {
+            const relPath = filePath.includes('systems') || filePath.includes('ui') || filePath.includes('config') 
+                ? '../assetHelper.js' 
+                : './assetHelper.js';
+            content = `import { getAssetUrl } from '${relPath}';\n` + content;
+        }
+
+        // Reemplaza rutas de fetch con assets
+        content = content.replace(/fetch\s*\(\s*(['"`])(?:https?:\/\/[^\/]+)?(?:\/[^\/]+)*?\/?(?:public\/|\$\{[^}]+\})?(assets\/[^'"`]+)\1\s*\)/g, "fetch(getAssetUrl('$2'))");
+        
+        if (content !== original) {
+            fs.writeFileSync(filePath, content, 'utf8');
+            console.log(`✅ Actualizado: ${filePath}`);
+        }
+    }
+}
+
+walkDir('./src');
+console.log('¡Proceso completado con éxito!');

@@ -1,0 +1,7 @@
+// src/assetHelper.js
+export function getAssetUrl(path) {
+  // Elimina la barra inicial si la tiene para evitar duplicados
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  // import.meta.env.BASE_URL devuelve '/axie-legends/' en producción y '/' en local
+  return `${import.meta.env.BASE_URL}${cleanPath}`;
+}
