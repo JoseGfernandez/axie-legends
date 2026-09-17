@@ -3,7 +3,6 @@
 // =============================================
 
 import { getAllAxies } from '../config/axies.js';
-import { getAssetUrl } from '../assetHelper.js';
 
 export class MenuScreen {
     constructor() {
@@ -19,13 +18,16 @@ export class MenuScreen {
 
         this.container = document.createElement('div');
         this.container.id = 'menu-screen';
+        
+        const baseUrl = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL ? import.meta.env.BASE_URL : './';
+        
         this.container.style.cssText = `
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: url(${getAssetUrl('assets/Axie%20Legends.jpg')}) center/cover no-repeat;
+            background: url('${baseUrl}assets/Axie%20Legends.jpg') center/cover no-repeat;
             display: flex;
             flex-direction: column;
             justify-content: center;
