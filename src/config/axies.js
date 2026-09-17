@@ -1,7 +1,7 @@
 ﻿// =============================================
 // CONFIGURACIÓN DE AXIES (7 TIPOS CON ESCALAS)
 // =============================================
-import { getAssetUrl } from '../assetHelper.js';
+import { getAssetUrl } from '../../assetHelper.js';
 
 export const AXIE_TYPES = {
     BING: 'bing',
