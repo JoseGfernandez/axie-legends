@@ -2954,8 +2954,17 @@ class Minion {
             const dist = Math.sqrt(dx * dx + dz * dz);
             this.group.rotation.y = Math.atan2(dx, dz);
 
+            const esEstructura = finalTarget.type === 'tower' || finalTarget.type === 'nexus';
             let attackRange = this.attackRange;
-            if (finalTarget.type === 'tower' || finalTarget.type === 'nexus') attackRange += 0.5;
+            if (esEstructura) attackRange += 0.5;
+
+            // Las torres estan desplazadas del eje del carril (azules en
+            // x -2.5, rojas en x 3.11). Si la X del minion convergiera a la
+            // de la torre, la tropa entera acabaria pegada a ese borde, que
+            // es justo lo que se veia: todos clavados en 3.11 al atacar.
+            // Contra estructuras se ataca DESDE EL CARRIL: la referencia
+            // lateral es el eje (0) y solo se avanza en profundidad.
+            const refX = esEstructura ? 0 : targetPos.x;
 
             const distToAttack = Math.max(0, dist - attackRange);
             const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
@@ -2995,7 +3004,7 @@ class Minion {
                         }
                     }
                 }
-                const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
+                const desiredX = refX + this.mySlotX * this.deployProgress;
                 const smoothFactor = 2.0 * this.deployProgress;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, smoothFactor * delta);
             } else {
@@ -3016,7 +3025,7 @@ class Minion {
                 // tiron de antes. El slot lateral solo abre hueco cuando ya
                 // esta cerca (deployProgress), asi que de lejos converge al
                 // eje del objetivo y no se va por los lados a no pelear.
-                const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
+                const desiredX = refX + this.mySlotX * this.deployProgress;
                 const lateralSmooth = 1.8;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, lateralSmooth * delta);
             }
