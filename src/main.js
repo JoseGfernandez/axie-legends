@@ -932,15 +932,15 @@ function procesarLanes() {
     // mide 1.30 de ancho, asi que en +-2.5 ocupa +-1.85 a +-3.15: bien
     // dentro del asfalto. En +-3.5 (+-2.85 a +-4.15) caia sobre el arcen,
     // la franja oscura del borde, y se veia fuera del carril.
-    if (!nexusAliado) nexusAliado = new Nexus(-2.0, -23, false);
-    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.0, 23, true);
-    if (!shopAliada) shopAliada = new Shop(4.0, -24, false);
-    if (!shopEnemiga) shopEnemiga = new Shop(-4.0, 24, true);
+    if (!nexusAliado) nexusAliado = new Nexus(-1.45, -23.00, false);
+    if (!nexusEnemigo) nexusEnemigo = new Nexus(1.57, 22.94, true);
+    if (!shopAliada) shopAliada = new Shop(2.05, -23.03, false);
+    if (!shopEnemiga) shopEnemiga = new Shop(-2.05, 22.78, true);
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
-        createTower(2.46, 17.86, true, 1);
-        createTower(2.32, 5.86, true, 2);
+        createTower(3.13, 17.62, true, 1);
+        createTower(3.11, 5.98, true, 2);
     }
     inicializarCamaraFija();
 }
@@ -3069,8 +3069,8 @@ function spawnWave() {
     // Deben coincidir con la z del nexo en createScene (arriba). Si se
     // mueve el nexo, hay que mover esto: antes estaban en +-21 mientras
     // el nexo ya habia ido a +-23, y los minions salian descolgados.
-    const NEXUS_Z_ALLY = -23.91;
-    const NEXUS_Z_ENEMY = 23.77;
+    const NEXUS_Z_ALLY = -23.00;
+    const NEXUS_Z_ENEMY = 22.94;
     const LANE_X = 0;
     const MELEE_ROWS = 2;
     const MELEE_PER_ROW = 3;
@@ -5034,8 +5034,8 @@ function abandonGame() {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(2.46, 17.86, true, 1);
-    createTower(2.32, 5.86, true, 2);
+    createTower(3.13, 17.62, true, 1);
+    createTower(3.11, 5.98, true, 2);
     gameStarted = false;
     startTimer = CONFIG.SPAWN_DELAY;
     waveNumber = 1;
@@ -5309,8 +5309,8 @@ async function startAIGame(axieId) {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(2.46, 17.86, true, 1);
-    createTower(2.32, 5.86, true, 2);
+    createTower(3.13, 17.62, true, 1);
+    createTower(3.11, 5.98, true, 2);
     resetEnemyAxie();
     inicializarCamaraFija();
     resetDynamicCamera();
