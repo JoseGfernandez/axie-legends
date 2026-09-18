@@ -52,6 +52,21 @@
     max-height:28vh; overflow:auto;
   }
   #out .nota { color:#8a8aa8; font-size:10.5px; margin-top:6px; line-height:1.5; }
+
+  #tropa { top:12px; right:326px; width:340px; max-height:52vh; overflow:auto; }
+  #tropa h2 { font-size:12px; color:#5fd68a; margin-bottom:7px; }
+  #tropa .btn {
+    padding:5px 10px; margin-bottom:7px; cursor:pointer; font-size:11px;
+    background:#2e4a8a; color:#fff; border:1px solid #4d7bd6; border-radius:6px;
+    font-family:inherit;
+  }
+  #tropa .btn:hover { background:#3a5bb0; }
+  #tropa pre {
+    background:#0a0a14; border:1px solid #2c2c48; border-radius:6px; padding:8px;
+    font-size:10.5px; line-height:1.45; white-space:pre-wrap; word-break:break-word;
+    max-height:34vh; overflow:auto;
+  }
+  #tropa .nota { color:#8a8aa8; font-size:10px; margin-top:6px; line-height:1.5; }
   kbd { background:#252540; border:1px solid #3a3a5c; border-radius:4px; padding:1px 5px; font-size:11px; }
 </style>
 </head>
@@ -81,6 +96,14 @@
 <div class="panel" id="sel">
   <h2 id="sel-tit">SIN SELECCIÓN</h2>
   <div id="sel-body"><div class="vacio">Haz clic en un objeto del mapa para moverlo.</div></div>
+</div>
+
+<div class="panel" id="tropa">
+  <h2>TROPA EN VIVO</h2>
+  <button class="btn" id="btn-copiar-tropa">COPIAR TROPA (T)</button>
+  <pre id="tropa-json">esperando partida...</pre>
+  <div class="nota">Minions con su posici&oacute;n real, refrescados solos.<br>
+  Pulsa el bot&oacute;n y me pegas aqu&iacute; lo que copie.</div>
 </div>
 
 <div class="panel" id="out">
@@ -514,6 +537,62 @@ addEventListener('keydown', (e) => {
   }
 });
 
+// --- tropa en vivo ---------------------------------------------------------
+// Los minions se mueven solos: el panel se refresca en un temporizador y
+// muestra su posicion real. Con esto se puede revisar el reparto lateral
+// sin depender de una captura.
+function leerTropaMinions() {
+  const w = iframe.contentWindow;
+  if (!w || !w.__debug || !w.__debug.actors) return null;
+  return w.__debug.actors.filter(a => a.label.indexOf('Minion') === 0);
+}
+
+function formatearTropa(lista) {
+  const azul = lista.filter(a => a.side === 'ally' && !a.isDead);
+  const rojo = lista.filter(a => a.side === 'enemy' && !a.isDead);
+  const linea = (a) => '  ' + a.label.padEnd(24) + ' x ' + a.x.toFixed(2).padStart(7) + '   z ' + a.z.toFixed(2).padStart(7);
+  const out = [];
+  out.push('TROPA AZUL (' + azul.length + ')');
+  azul.sort((a, b) => b.z - a.z).forEach(a => out.push(linea(a)));
+  out.push('');
+  out.push('TROPA ROJA (' + rojo.length + ')');
+  rojo.sort((a, b) => a.z - b.z).forEach(a => out.push(linea(a)));
+  out.push('');
+  const mages = lista.filter(a => a.label.indexOf('mage') > 0);
+  if (mages.length) out.push('mages en el carril: ' + mages.length);
+  const todos = lista.filter(a => !a.isDead);
+  if (todos.length) {
+    const xs = todos.map(a => a.x);
+    out.push('X de la tropa: min ' + Math.min(...xs).toFixed(2) + '  max ' + Math.max(...xs).toFixed(2));
+  }
+  return out.join('\n');
+}
+
+function refrescarTropa() {
+  const pre = document.getElementById('tropa-json');
+  if (!pre) return;
+  const lista = leerTropaMinions();
+  if (!lista) { pre.textContent = 'esperando partida...'; return; }
+  pre.textContent = formatearTropa(lista);
+}
+
+document.getElementById('btn-copiar-tropa').addEventListener('click', () => {
+  const txt = document.getElementById('tropa-json').textContent;
+  const h2 = document.getElementById('tropa').querySelector('h2');
+  navigator.clipboard.writeText(txt).then(() => {
+    h2.textContent = 'COPIADO';
+    setTimeout(() => { h2.textContent = 'TROPA EN VIVO'; }, 1200);
+  }).catch(() => {
+    h2.textContent = 'no se pudo copiar, selecciona a mano';
+    setTimeout(() => { h2.textContent = 'TROPA EN VIVO'; }, 2000);
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 't' || e.key === 'T') { document.getElementById('btn-copiar-tropa').click(); }
+});
+
+setInterval(refrescarTropa, 500);
 iframe.addEventListener('load', conectar);
 setTimeout(conectar, 500);
 </script>
