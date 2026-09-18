@@ -3425,6 +3425,7 @@ function loadDefaultAxie() {
             fb.position.y = GROUND_Y;
             scene.add(fb);
             playerModel = fb;
+            attachPlayerHealthBar();
             smoothPlayerPos.copy(playerSpawnPosition);
             axieLoaded = true;
             currentAxieName = 'Bing';
