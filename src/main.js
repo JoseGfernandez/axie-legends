@@ -15,7 +15,7 @@ const CONFIG = {
     pixelRatio: 1.2,
     updateInterval: 1,
     minionLimitZ: 26,
-    camaraAngulo: 60,
+    camaraAngulo: 87,
     camaraDistancia: 20,
     camaraAltura: 16,
     SPAWN_DELAY: 15,
@@ -56,7 +56,8 @@ const CONFIG = {
     // y los topes Z no coincidian con la posicion real de las torres
     // (torres aliadas en Z=-18 y Z=-6 / enemigas en Z=18 y Z=6; nexos en +-21).
     MINION_LANE_LIMIT_X: 4.0,        // ancho real util del carril (de 10 total)
-    MINION_LANE_LIMIT_Z: 25.0,       // tope absoluto del carril
+    MINION_LANE_LIMIT_Z: 26.0,       // tope absoluto del carril (igual que
+                                     // minionLimitZ: antes 25 y 26 no coincidian)
     // Los minions no se acercan mas alla del ultimo nexus (Z=+-21)
     MINION_MAX_Z_ALLY: -25.0,        // negativos = lado aliado
     MINION_MAX_Z_ENEMY: 25.0,        // positivos = lado enemigo
@@ -174,7 +175,7 @@ function findWeaponBone(root) {
     return null;
 }
 
-function attachAxieWeapon(axieModel, axieData) {
+function attachAxieWeapon(axieModel, axieData, esEnemigo = false) {
     if (!axieModel || !axieData) return;
     const armaPath = axieData.arma || null;
     if (!armaPath) return;
@@ -246,8 +247,17 @@ function attachAxieWeapon(axieModel, axieData) {
         if (perfil.giroArma) {
             arma.rotateY(THREE.MathUtils.degToRad(perfil.giroArma));
         }
+        // El Axie enemigo se gira 180 grados para mirar hacia el jugador
+        // (enemyAxieModel.rotation.y = PI). El arma cuelga del hueso, asi que
+        // hereda ese giro: la misma calibracion que deja el arma bien en el
+        // jugador la deja mirando al reves en el enemigo. Se deshace el giro
+        // para que el arma del enemigo quede en la misma orientacion relativa
+        // al cuerpo que la del jugador.
+        if (esEnemigo) {
+            arma.rotateY(Math.PI);
+        }
 
-        console.log('Arma de ' + axieData.nombre + ' en ' + hueso.name + ' (escala ' + arma.scale.x.toFixed(3) + ')');
+        console.log('Arma de ' + axieData.nombre + ' en ' + hueso.name + ' (escala ' + arma.scale.x.toFixed(3) + ')' + (esEnemigo ? ' [enemigo]' : ''));
     }, undefined, (err) => {
         console.warn('No se pudo cargar el arma de ' + axieData.nombre + ': ' + (err && err.message ? err.message : err));
     });
@@ -263,11 +273,17 @@ function clampMinionToLane(minion) {
     // Limite absoluto en Z (nunca salir del carril entero)
     if (minion.group.position.z > limZ) minion.group.position.z = limZ;
     else if (minion.group.position.z < -limZ) minion.group.position.z = -limZ;
-    // Avance maximo por bando: los enemigos no pasan del nexus aliado (Z=-21)
-    // y los aliados no pasan del nexus enemigo (Z=+21). Margen de 1.5 para
-    // que puedan atacar el nexus sin atravesarlo.
-    const MAX_Z_ALLY = -21.0 - 1.5;
-    const MAX_Z_ENEMY = 21.0 + 1.5;
+    // Avance maximo por bando: los enemigos no pasan del nexo aliado (Z=-21)
+    // y los aliados no pasan del nexo enemigo (Z=+21).
+    //
+    // OJO: el tope tiene que quedar POR DETRAS de la formacion de spawn.
+    // Los mage nacen en Z=+-24.1 (nexo 21 + 2 filas de melee de 1.3 + 0.5),
+    // asi que un tope de 22.5 los empujaba hacia dentro nada mas nacer: los
+    // mage enemigos se quedaban apilados contra los melee, atrapados junto
+    // al nexo. Ahora el tope es solo una red de seguridad por si algo los
+    // empuja hacia fuera; la formacion cabe entera.
+    const MAX_Z_ALLY = -25.5;
+    const MAX_Z_ENEMY = 25.5;
     if (minion.isEnemy) {
         if (minion.group.position.z > MAX_Z_ENEMY) minion.group.position.z = MAX_Z_ENEMY;
     } else {
@@ -654,12 +670,44 @@ const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.OrthographicCamera(-frustumSize * aspect / 2, frustumSize * aspect / 2, frustumSize / 2, -frustumSize / 2, 0.1, 100);
 camera.zoom = 0.88;
 
-const CAMERA_ANGLE_RAD = CONFIG.camaraAngulo * Math.PI / 180;
-const CAMERA_OFFSET = new THREE.Vector3(
-    Math.sin(CAMERA_ANGLE_RAD) * CONFIG.camaraDistancia,
-    CONFIG.camaraAltura,
-    Math.cos(CAMERA_ANGLE_RAD) * CONFIG.camaraDistancia
-);
+// Angulo de camara efectivo. Empieza en el valor del catalogo, pero se puede
+// cambiar en vivo con las teclas 1/2/3/4 para comparar perspectivas sin
+// editar el archivo ni recargar (ver ajustarAnguloCamara mas abajo).
+let camaraAnguloActual = CONFIG.camaraAngulo;
+const CAMERA_OFFSET = new THREE.Vector3(0, CONFIG.camaraAltura, 0);
+
+// Recalcula el offset de la camara a partir del angulo actual. Se llama al
+// arrancar y cada vez que se cambia el angulo en vivo.
+function recalcularOffsetCamara() {
+    const rad = camaraAnguloActual * Math.PI / 180;
+    CAMERA_OFFSET.set(
+        Math.sin(rad) * CONFIG.camaraDistancia,
+        CONFIG.camaraAltura,
+        Math.cos(rad) * CONFIG.camaraDistancia
+    );
+}
+recalcularOffsetCamara();
+
+// Cambia el angulo en vivo. 0 = mirando el carril de frente (las torres se
+// alinean en vertical); 60 = el valor original, con el carril muy de lado.
+function ajustarAnguloCamara(grados) {
+    camaraAnguloActual = grados;
+    recalcularOffsetCamara();
+    if (groundReady && playerModel) {
+        CAMERA_FIXED_Y = GROUND_Y + CAMERA_OFFSET.y;
+        cameraSmoothPos.set(
+            playerModel.position.x + CAMERA_OFFSET.x,
+            CAMERA_FIXED_Y,
+            playerModel.position.z + CAMERA_OFFSET.z
+        );
+        camera.position.copy(cameraSmoothPos);
+        camera.lookAt(cameraSmoothTarget);
+        camera.updateProjectionMatrix();
+    }
+    console.log('🎥 Angulo de camara: ' + grados + ' grados'
+        + (grados === 0 ? ' (carril de frente)' : grados >= 45 ? ' (original, carril de lado)' : ' (intermedio)'));
+}
+window.__anguloCamara = () => camaraAnguloActual;
 
 const cameraSmoothPos = new THREE.Vector3(0, 0, 0);
 const cameraSmoothTarget = new THREE.Vector3(0, 0, 0);
@@ -867,8 +915,13 @@ function procesarLanes() {
     groundReady = true;
     console.log(`✅ GROUND_Y = ${GROUND_Y.toFixed(3)}`);
 
-    if (!nexusAliado) nexusAliado = new Nexus(2.0, -21, false);
-    if (!nexusEnemigo) nexusEnemigo = new Nexus(-1.2, 21, true);
+    // Nexo, tienda y torres comparten el MISMO eje lateral por bando:
+    // aliado en x=-2.5, enemigo en x=+2.5. Antes el nexo aliado estaba en
+    // x=+2.0 y el enemigo en x=-1.2: al lateral contrario de sus propias
+    // torres. Con la camara casi de perfil (87 grados) ese cruce se nota
+    // y cada nexo parecia descolgado hacia el bando equivocado.
+    if (!nexusAliado) nexusAliado = new Nexus(-2.5, -21, false);
+    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.5, 21, true);
     if (!shopAliada) shopAliada = new Shop(-2.5, -22, false);
     if (!shopEnemiga) shopEnemiga = new Shop(2.5, 22, true);
     if (towers.length === 0) {
@@ -3727,7 +3780,7 @@ function spawnEnemyAxie() {
         if (clipWalkE) enemyAxieAnimWalk = enemyAxieMixer.clipAction(clipWalkE);
         if (clipAttackE) enemyAxieAnimAttack = enemyAxieMixer.clipAction(clipAttackE);
         if (enemyAxieAnimIdle) { enemyAxieAnimIdle.play(); enemyAxieCurrentAnim = 'idle'; }
-        attachAxieWeapon(enemyAxieModel, randomAxie);
+        attachAxieWeapon(enemyAxieModel, randomAxie, true);
         const hb = createHealthBar(ENEMY_HEALTH_SEGMENTS, true);
         hb.sprite.position.set(0, 1.8, 0);
         enemyAxieModel.add(hb.sprite);
