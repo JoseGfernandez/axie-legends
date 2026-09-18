@@ -76,6 +76,12 @@ const CONFIG = {
     // es por orden de llegada (ver reclamarSlot), no por indice fijo.
     MINION_SLOTS_MELEE: [0, -1.0, 1.0, -2.0, 2.0],
     MINION_SLOTS_MAGE: [0, -1.2, 1.2],
+
+    // Separacion en profundidad entre la linea de melee y la de mage.
+    // El mage se queda esta distancia por detras del melee mas
+    // adelantado de su bando, para que las dos lineas se lean aparte
+    // y no queden mezcladas en la misma fila.
+    MINION_MAGE_Z_OFFSET: 3.5,
     AXIE_SHOP_DAMAGE_MEMORY: 3.0,
     AXIE_SHOP_HP_MIN: 0.60,
     AXIE_SHOP_CANCEL_HP: 0.50,
@@ -2110,7 +2116,7 @@ class Minion {
         if (tipo === 'mage') {
             // El mage si lleva su distancia de combate desde el principio:
             // es lo que lo mantiene en la linea de atras.
-            this.combatOffsetZ = isEnemy ? -2.5 : 2.5;
+            this.combatOffsetZ = isEnemy ? -CONFIG.MINION_MAGE_Z_OFFSET : CONFIG.MINION_MAGE_Z_OFFSET;
         }
         this.slotBase = 0;
         // El slot es un desplazamiento lateral relativo al bando: el
