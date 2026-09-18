@@ -3001,11 +3001,10 @@ class Minion {
             } else {
                 this.state = 'move';
                 const norm = dist > 0.1 ? dist : 1;
-                // Avanza SOLO en profundidad, hacia el objetivo. La X no
-                // persigue al objetivo: cuando el target moria y saltaba a
-                // otro del extremo contrario, dx cambiaba de signo y el
-                // minion cruzaba el carril de golpe. Ahora la X la manda
-                // siempre el slot de formacion, con suavizado.
+                // Avanza en profundidad hacia el objetivo. La X tambien
+                // converge a el, pero con suavizado en vez de a velocidad
+                // completa: asi cuando el target muere y salta a otro del
+                // extremo contrario no hay tiron lateral.
                 // El mage no se pega al objetivo: se queda a su distancia
                 // de combate (combatOffsetZ), detras del melee. Sin esto el
                 // offset se asignaba en el constructor y no se leia nunca,
@@ -3013,8 +3012,12 @@ class Minion {
                 const holdDist = this.combatOffsetZ !== 0 ? Math.abs(this.combatOffsetZ) : 0;
                 const advance = (dist - holdDist) > 0.05 ? 1 : (dist - holdDist) < -0.05 ? -1 : 0;
                 this.group.position.z += (dz / norm) * this.speed * delta * advance;
+                // La X SI va hacia el objetivo, pero suavizada y sin el
+                // tiron de antes. El slot lateral solo abre hueco cuando ya
+                // esta cerca (deployProgress), asi que de lejos converge al
+                // eje del objetivo y no se va por los lados a no pelear.
                 const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
-                const lateralSmooth = 2.2;
+                const lateralSmooth = 1.8;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, lateralSmooth * delta);
             }
         } else {
