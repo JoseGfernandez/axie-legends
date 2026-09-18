@@ -6198,6 +6198,32 @@ window.__debug = {
     },
     get config() { return CONFIG; },
 
+    // Mueve un objeto del carril a una posicion concreta. Lo usa el
+    // editor de posiciones de la vista cenital: el usuario arrastra y
+    // esto aplica el cambio sobre el objeto real, para que vea el
+    // resultado en vivo sin recargar. Devuelve la posicion aplicada.
+    setPos(label, x, z) {
+        const objetivos = [
+            ['Nexo azul', nexusAliado], ['Nexo rojo', nexusEnemigo],
+            ['Tienda azul', shopAliada], ['Tienda roja', shopEnemiga],
+            ['Jugador', playerModel ? { group: playerModel } : null],
+            ['Axie rival', enemyAxieModel ? { group: enemyAxieModel } : null],
+        ];
+        towers.forEach(tw => {
+            if (!tw || !tw.group) return;
+            objetivos.push(['Torre ' + (tw.isEnemy ? 'roja' : 'azul') + ' T' + (tw.tier || 1), tw]);
+        });
+        for (const [nombre, obj] of objetivos) {
+            if (nombre === label && obj && obj.group) {
+                obj.group.position.x = x;
+                obj.group.position.z = z;
+                if (obj.position) { obj.position.x = x; obj.position.z = z; }
+                return { ok: true, label, x, z };
+            }
+        }
+        return { ok: false, error: 'objeto no encontrado: ' + label };
+    },
+
     // Arranque automatico para la vista cenital: monta una partida sin
     // pasar por el menu, para que el escenario (carril, torres, nexos y
     // tiendas) exista y se pueda medir. Idempotente: si ya hay escenario,
