@@ -70,6 +70,12 @@ const CONFIG = {
     AXIE_RETREAT_MIN_TIME: 1.5,
     AXIE_RETREAT_COOLDOWN: 3.0,
     SPAWN_STAGGER_DELAY: 1.0,
+
+    // Huecos laterales por tipo, en orden de preferencia: el primero
+    // es el centro y el resto se abren hacia los extremos. El reparto
+    // es por orden de llegada (ver reclamarSlot), no por indice fijo.
+    MINION_SLOTS_MELEE: [0, -1.0, 1.0, -2.0, 2.0],
+    MINION_SLOTS_MAGE: [0, -1.2, 1.2],
     AXIE_SHOP_DAMAGE_MEMORY: 3.0,
     AXIE_SHOP_HP_MIN: 0.60,
     AXIE_SHOP_CANCEL_HP: 0.50,
@@ -272,6 +278,42 @@ function attachAxieWeapon(axieModel, axieData, esEnemigo = false) {
     }, undefined, (err) => {
         console.warn('No se pudo cargar el arma de ' + axieData.nombre + ': ' + (err && err.message ? err.message : err));
     });
+}
+
+// Reparto lateral por ORDEN DE LLEGADA.
+//
+// Cada minion llega a la zona de formacion y reclama el hueco libre mas
+// cercano al centro de su tipo. El que llega antes coge antes:
+//
+//   llega 1.o      -> centro
+//   llegan 2.o,3.o -> se abren a izquierda y derecha
+//   llegan 4.o,5.o -> se meten junto al centro
+//
+// Antes el slot era fijo por indice, asi que el abanico nacia ya abierto
+// en el nexo. Con la reclamacion el abanico crece desde el centro hacia
+// fuera, que es lo que se ve natural.
+function reclamarSlot(minion) {
+    if (!minion || minion.slotReclamado) return;
+    const esMelee = (minion.tipo === 'melee' || minion.esBig);
+    const slots = esMelee ? CONFIG.MINION_SLOTS_MELEE : CONFIG.MINION_SLOTS_MAGE;
+    // El slot base es por bando: el enemigo recorre el carril espejado.
+    const signo = minion.isEnemy ? -1 : 1;
+    const bando = minion.isEnemy ? enemigos : aliados;
+    // Huecos ya cogidos por companeros vivos del mismo tipo.
+    const cogidos = new Set();
+    for (const otro of bando) {
+        if (otro === minion || otro.isDead || !otro.slotReclamado) continue;
+        if ((otro.tipo === 'melee' || otro.esBig) !== esMelee) continue;
+        cogidos.add(otro.slotBase);
+    }
+    // Se recorre la lista de preferencia en orden: centro, lados, extremos.
+    let elegido = slots[0];
+    for (const s of slots) {
+        if (!cogidos.has(s)) { elegido = s; break; }
+    }
+    minion.slotBase = elegido;
+    minion.mySlotX = signo * elegido;
+    minion.slotReclamado = true;
 }
 
 function clampMinionToLane(minion) {
@@ -2059,28 +2101,29 @@ class Minion {
         this.hitFlashTimer = 0;     // temporizador del destello rojo al recibir dano
         this._currentAction = null;
 
+        // El hueco lateral NO se fija aqui: se reclama al llegar a la zona
+        // de formacion, por orden de llegada (ver reclamarSlot). Asi el
+        // abanico crece desde el centro hacia fuera en vez de nacer abierto
+        // en el nexo. Hasta que reclame, avanza por el centro.
         this.combatOffsetX = 0;
         this.combatOffsetZ = 0;
-        if (tipo === 'melee' || esBig) {
-            // El grande va por el centro del carril y no se pega a los muros.
-            const meleeSlots = [0, -1.0, 1.0, -2.0, 2.0];
-            this.combatOffsetX = esBig ? 0 : (meleeSlots[formationIndex % meleeSlots.length] || 0);
-            this.combatOffsetZ = 0;
-        } else {
-            // Slot por posicion DENTRO de los mages (typeIndex), no por un
-            // desplazamiento fijo de 5: con 3 melee en vez de 5, el indice
-            // del mage arrancaba en 3 y (formationIndex - 5) daba slots
-            // negativos, asi que la linea de atras salia descuadrada.
-            const mageSlots = [0, -1.2, 1.2];
-            this.combatOffsetX = mageSlots[this.typeIndex % mageSlots.length] || 0;
+        if (tipo === 'mage') {
+            // El mage si lleva su distancia de combate desde el principio:
+            // es lo que lo mantiene en la linea de atras.
             this.combatOffsetZ = isEnemy ? -2.5 : 2.5;
         }
+        this.slotBase = 0;
         // El slot es un desplazamiento lateral relativo al bando: el
         // enemigo avanza hacia Z- (rotado 180 grados), asi que su lado del
         // mundo es el contrario. Sin espejar, los dos bandos se apinaban
         // en la misma mitad del carril y el reparto se veia torcido.
         this.mySlotX = isEnemy ? -this.combatOffsetX : this.combatOffsetX;
         this.formationSet = false;
+        // Reparto por orden de llegada: el minion reclama su hueco
+        // lateral cuando alcanza la zona de formacion, no al nacer.
+        // Asi el 1o coge el centro, el 2o y 3o se abren, y el 4o y
+        // 5o se meten junto al centro, en vez de nacer ya abiertos.
+        this.slotReclamado = false;
         this.deployProgress = 0;
 
         this.group = new THREE.Group();
@@ -2977,6 +3020,11 @@ class Minion {
 
             const distToAttack = Math.max(0, dist - attackRange);
             const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
+            // Al entrar en la zona de formacion reclama su hueco lateral.
+            // Es por orden de llegada: el 1.o el centro, el 2.o y 3.o se
+            // abren, el 4.o y 5.o se meten junto al centro. Solo se
+            // reclama una vez; el hueco se libera al morir el minion.
+            if (deployTarget === 1) reclamarSlot(this);
             // Despliegue lateral progresivo. Con 2.5 el minion se abria de golpe
         // al entrar en rango (tiron brusco); 1.1 lo reparte a lo largo de
         // ~1.5 s, que es el amago ordenado de los minions de LoL.
