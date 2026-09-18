@@ -25,8 +25,9 @@ export const AXIES_DATA = {
         nombre: 'Bing',
         descripcion: 'El líder feroz del equipo',
         modelo: getAssetUrl('assets/axies/bing.glb'),
+        arma: getAssetUrl('assets/weapons_axies/bing-cannon.glb'),
         color: '#ff4444',
-        escala: 1.2,
+        escala: 1.08,
         stats: { vida: 150, ataque: 20, defensa: 30, velocidad: 1.0 },
         habilidades: {
             pasiva: { nombre: 'Piel Dura', descripcion: 'Reduce el daño recibido en un 15%.', icono: '🛡️' },
@@ -39,8 +40,9 @@ export const AXIES_DATA = {
         nombre: 'Kibo',
         descripcion: 'Ágil y veloz como el viento',
         modelo: getAssetUrl('assets/axies/kibo.glb'),
+        arma: getAssetUrl('assets/weapons_axies/kibo-hammer.glb'),
         color: '#44aaff',
-        escala: 1.05,
+        escala: 0.95,
         stats: { vida: 130, ataque: 22, defensa: 25, velocidad: 1.3 },
         habilidades: {
             pasiva: { nombre: 'Agilidad Felina', descripcion: 'Aumenta la velocidad de movimiento un 10%.', icono: '💨' },
@@ -53,8 +55,9 @@ export const AXIES_DATA = {
         nombre: 'Kotaro',
         descripcion: 'Astuto y estratégico',
         modelo: getAssetUrl('assets/axies/kotaro.glb'),
+        arma: getAssetUrl('assets/weapons_axies/kotaro-sword.glb'),
         color: '#ff8844',
-        escala: 1.15,
+        escala: 1.04,
         stats: { vida: 140, ataque: 18, defensa: 28, velocidad: 1.1 },
         habilidades: {
             pasiva: { nombre: 'Mente Estratégica', descripcion: 'Aumenta el daño crítico un 20%.', icono: '🧠' },
@@ -67,8 +70,9 @@ export const AXIES_DATA = {
         nombre: 'Paladill',
         descripcion: 'Portador de la justicia',
         modelo: getAssetUrl('assets/axies/paladill.glb'),
+        arma: getAssetUrl('assets/weapons_axies/paladill-axe.glb'),
         color: '#aa66ff',
-        escala: 1.0,
+        escala: 0.9,
         stats: { vida: 160, ataque: 15, defensa: 35, velocidad: 0.9 },
         habilidades: {
             pasiva: { nombre: 'Escudo Sagrado', descripcion: 'Bloquea el 20% del daño recibido.', icono: '🛡️' },
@@ -81,8 +85,9 @@ export const AXIES_DATA = {
         nombre: 'Pomodoro',
         descripcion: 'Pequeño pero letal',
         modelo: getAssetUrl('assets/axies/pomodoro.glb'),
+        arma: getAssetUrl('assets/weapons_axies/pomodoro-staff.glb'),
         color: '#44ff88',
-        escala: 1.0,
+        escala: 0.9,
         stats: { vida: 110, ataque: 28, defensa: 18, velocidad: 1.4 },
         habilidades: {
             pasiva: { nombre: 'Agilidad Tomatera', descripcion: 'Aumenta la velocidad de ataque un 15%.', icono: '🍅' },
@@ -95,8 +100,9 @@ export const AXIES_DATA = {
         nombre: 'Tripp',
         descripcion: 'Místico y poderoso',
         modelo: getAssetUrl('assets/axies/tripp.glb'),
+        arma: getAssetUrl('assets/weapons_axies/tripp-sword.glb'),
         color: '#ff66aa',
-        escala: 1.1,
+        escala: 0.99,
         stats: { vida: 120, ataque: 25, defensa: 22, velocidad: 1.2 },
         habilidades: {
             pasiva: { nombre: 'Energía Mística', descripcion: 'Recupera vida lentamente.', icono: '🔮' },
@@ -109,8 +115,9 @@ export const AXIES_DATA = {
         nombre: 'Xia',
         descripcion: 'Brilla con luz propia',
         modelo: getAssetUrl('assets/axies/xia.glb'),
+        arma: getAssetUrl('assets/weapons_axies/xia-axe.glb'),
         color: '#ffdd44',
-        escala: 1.1,
+        escala: 0.99,
         stats: { vida: 125, ataque: 23, defensa: 24, velocidad: 1.3 },
         habilidades: {
             pasiva: { nombre: 'Luz Brillante', descripcion: 'Aumenta la precisión de los ataques.', icono: '⭐' },
@@ -124,6 +131,27 @@ export function getAxieById(id) {
     return AXIES_DATA[id] || null;
 }
 
+// =============================================
+// AXIES HABILITADOS PARA JUGAR
+// =============================================
+// Solo estos Axies aparecen en la seleccion de 1v1.
+// Tarea 2: de los 7 originales se deshabilitan 5 y quedan Bing y Kotaro.
+// Para volver a habilitar uno, basta con anadir su id aqui.
+export const AXIES_HABILITADOS = ['bing', 'kotaro'];
+
+// Devuelve los objetos completos de los Axies habilitados (en ese orden).
+export function getAxiesHabilitados() {
+    return AXIES_HABILITADOS
+        .map(id => AXIES_DATA[id])
+        .filter(Boolean);
+}
+
+// Indica si un Axie puede usarse en partida.
+export function isAxieHabilitado(id) {
+    return AXIES_HABILITADOS.includes(id);
+}
+
+// Devuelve TODOS los Axies (habilitados o no). Util para IA/entrenamiento futuro.
 export function getAllAxies() {
     return Object.values(AXIES_DATA);
 }

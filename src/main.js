@@ -49,10 +49,16 @@ const CONFIG = {
     AXIE_SPAWN_TIME: 3.0,
     MINION_SPAWN_TIME: 15.0,
     SHOP_AUTO_OPEN_COOLDOWN: 1.5,
-    MINION_LANE_LIMIT_X: 2.0,
-    MINION_LANE_LIMIT_Z: 24,
-    MINION_MAX_Z_ALLY: 20.0,
-    MINION_MAX_Z_ENEMY: -20.0,
+    // === CARRIL ===
+    // El carril mide LANE_TARGET_WIDTH = 10 de ancho (=> +-5 desde el centro).
+    // Antes los minions quedaban encerrados en +-2.0 (pasillo demasiado estrecho)
+    // y los topes Z no coincidian con la posicion real de las torres
+    // (torres aliadas en Z=-18 y Z=-6 / enemigas en Z=18 y Z=6; nexos en +-21).
+    MINION_LANE_LIMIT_X: 4.0,        // ancho real util del carril (de 10 total)
+    MINION_LANE_LIMIT_Z: 25.0,       // tope absoluto del carril
+    // Los minions no se acercan mas alla del ultimo nexus (Z=+-21)
+    MINION_MAX_Z_ALLY: -25.0,        // negativos = lado aliado
+    MINION_MAX_Z_ENEMY: 25.0,        // positivos = lado enemigo
     AXIE_RETREAT_SAFE_DISTANCE: 1.5,
     AXIE_POTION_USE_THRESHOLD: 0.50,
     AXIE_POTION_BUY_THRESHOLD: 300,
@@ -82,6 +88,12 @@ const CONFIG = {
     MAGE_GLB_IDLE:   `${import.meta.env.BASE_URL}assets/minions/mage2_idle.glb`,
     MAGE_GLB_ATTACK: `${import.meta.env.BASE_URL}assets/minions/mage2_attack.glb`,
     MAGE_GLB_STAFF:  `${import.meta.env.BASE_URL}assets/weapons_minions/mage2_staff.glb`,
+    // --- Combate de minions ---
+    MINION_ATTACK_ANIM_TIME: 0.45,   // duracion visual del golpe (s)
+    MINION_MELEE_LUNGE: 0.35,        // cuanto se lanza el melee hacia delante al golpear
+    MINION_HIT_FLASH_TIME: 0.12,     // destello rojo al recibir dano
+    MINION_ATTACK_RANGE_MELEE: 1.5,
+    MINION_ATTACK_RANGE_MAGE: 4.0,
     TERRAIN_GLB_LANE: `${import.meta.env.BASE_URL}assets/terrain/carril_1.glb`,
     TOWER_GLB_ALLY: `${import.meta.env.BASE_URL}assets/tower/tower1.glb`,
     TOWER_GLB_ENEMY: `${import.meta.env.BASE_URL}assets/tower/tower2.glb`,
@@ -104,8 +116,29 @@ const CONFIG = {
     SHOP_GLB_SCALE_ENEMY: 1.0,
     SHOP_GLB_ROTATION_Y_ALLY: 0,
     SHOP_GLB_ROTATION_Y_ENEMY: 0,
-    MINION_GLB_HEIGHT: 0.45,
-    MINION_COLLISION_DISTANCE: 0.75,
+    // --- Escala de los minions ---
+    // El Axie mide 1.90 de alto. Los minions apuntan al 58% (~1.10),
+    // que es la proporcion de LoL: el minion llega al pecho del campeon.
+    // El modelo del melee esta construido a escala 1.0 = 1.10 de alto,
+    // asi que esta constante es un multiplicador fino, no una altura.
+    MINION_SCALE: 0.85,
+    MINION_COLLISION_DISTANCE: 0.70,
+
+    // --- Disparo de la torre ---
+    // Cuanto se eleva el proyectil a mitad de camino. Con 0 el disparo va
+    // recto y pegado al suelo; con 0.6 describe el arco clasico de LoL.
+    TOWER_SHOT_ARC_HEIGHT: 0.6,
+
+    // --- Minion grande (super minion) ---
+    // Multiplicadores sobre un minion normal. Se limita el numero vivo
+    // para no cargar memoria ni el bucle de colisiones.
+    // 1.5 sobre el melee (1.125) da 1.69 de alto = 89% del Axie (1.90).
+    // Medido con el arnes: impone presencia sin tapar al campeon.
+    BIG_MINION_SCALE: 1.25,       // tamano visual
+    BIG_MINION_HP_MULT: 3.0,      // resistencia sobre el melee base (100)
+    BIG_MINION_DMG_MULT: 2.5,     // dano sobre el melee base (10)
+    BIG_MINION_SPEED_MULT: 0.85,  // un poco mas lento: se le ve llegar
+    BIG_MINION_MAX_ALIVE: 2,      // tope duro por bando
 };
 
 function getAxieModelPath(axieData) {
@@ -122,18 +155,97 @@ function getAxieModelPath(axieData) {
     return CONFIG.AXIES_BASE_PATH + 'bing.glb';
 }
 
+// ============================================================
+// ARMAS DE LOS AXIES
+// ------------------------------------------------------------
+// Cada Axie tiene su GLB en config/axies.js (campo `arma`). El arma se cuelga
+// del anclaje dedicado del rig, Weapon_R_JNT. Se comprobo que 6 de los 7 GLB
+// tienen el pivote en la empuñadura, asi que encajan solos. Hay que compensar
+// la escala interna del rig (Bing_Rig = 0.01) o el arma queda invisible.
+// ============================================================
+function findWeaponBone(root) {
+    const huesos = [];
+    root.traverse((n) => { if (n.isBone) huesos.push(n); });
+    for (const clave of ['weapon_r_jnt', 'weapon_r', 'hand_r_jnt', 'hand_r']) {
+        const hit = huesos.find(b => b.name.toLowerCase().includes(clave));
+        if (hit) return hit;
+    }
+    return null;
+}
+
+function attachAxieWeapon(axieModel, axieData) {
+    if (!axieModel || !axieData) return;
+    const armaPath = axieData.arma || null;
+    if (!armaPath) return;
+
+    sharedGLTFLoader.load(armaPath, (gltf) => {
+        // bing-cannon es el unico GLB con malla ARTICULADA (SkinnedMesh con un
+        // hueso, Cannon_JNT). Clonarla deja el clon apuntando al esqueleto
+        // original y el canon no se renderiza. Los otros seis son mallas planas
+        // y si toleran el clon.
+        let tieneSkin = false;
+        gltf.scene.traverse((n) => { if (n.isSkinnedMesh) tieneSkin = true; });
+        const arma = tieneSkin ? gltf.scene : gltf.scene.clone(true);
+        arma.traverse((n) => { if (n.isMesh) { n.castShadow = false; n.receiveShadow = false; } });
+
+        // El arma se cuelga del hueso Weapon_R_JNT. Se comprobo que 6 de los 7
+        // GLB traen el pivote en la empuñadura (Z al 100% del bbox), asi que
+        // cuelgan solos en su sitio sin inventar posiciones a mano. La unica
+        // trampa es la escala: el rig del Axie viene escalado (Bing_Rig = 0.01)
+        // y el hueso la hereda, asi que hay que compensarla o el arma queda
+        // 100x mas pequena e invisible.
+        const hueso = findWeaponBone(axieModel);
+        if (!hueso) {
+            console.warn('Anclaje de arma no encontrado en ' + axieData.nombre + '; el Axie sale sin arma');
+            return;
+        }
+
+        const wb = new THREE.Box3().setFromObject(arma);
+        const ws = wb.getSize(new THREE.Vector3());
+        const wMax = Math.max(ws.x, ws.y, ws.z) || 1;
+        const altura = new THREE.Box3().setFromObject(axieModel).getSize(new THREE.Vector3()).y || 2;
+
+        const escalaHueso = new THREE.Vector3();
+        hueso.getWorldScale(escalaHueso);
+        const factorPadre = escalaHueso.x || 1;
+        arma.scale.setScalar(((altura * 0.60) / wMax) / factorPadre);
+
+        hueso.add(arma);
+        arma.position.set(0, 0, 0);
+
+        // El hueso hereda la rotacion del brazo, que va extendido, y eso deja el
+        // eje Y local apuntando al suelo (medido: (+0.77, -0.64, -0.01)). El arma
+        // salia clavada hacia las piernas. Se cancela el giro heredado para
+        // devolverla a su orientacion natural (Z al frente en estos GLB).
+        const rotHueso = new THREE.Quaternion();
+        hueso.getWorldQuaternion(rotHueso);
+        arma.quaternion.copy(rotHueso.invert());
+
+        console.log('Arma de ' + axieData.nombre + ' en ' + hueso.name + ' (escala ' + arma.scale.x.toFixed(3) + ')');
+    }, undefined, (err) => {
+        console.warn('No se pudo cargar el arma de ' + axieData.nombre + ': ' + (err && err.message ? err.message : err));
+    });
+}
+
 function clampMinionToLane(minion) {
     if (!minion || !minion.group) return;
     const limX = CONFIG.MINION_LANE_LIMIT_X;
     const limZ = CONFIG.MINION_LANE_LIMIT_Z;
+    // Ancho del carril (evita que se salgan por los lados)
     if (minion.group.position.x > limX) minion.group.position.x = limX;
     else if (minion.group.position.x < -limX) minion.group.position.x = -limX;
+    // Limite absoluto en Z (nunca salir del carril entero)
+    if (minion.group.position.z > limZ) minion.group.position.z = limZ;
+    else if (minion.group.position.z < -limZ) minion.group.position.z = -limZ;
+    // Avance maximo por bando: los enemigos no pasan del nexus aliado (Z=-21)
+    // y los aliados no pasan del nexus enemigo (Z=+21). Margen de 1.5 para
+    // que puedan atacar el nexus sin atravesarlo.
+    const MAX_Z_ALLY = -21.0 - 1.5;
+    const MAX_Z_ENEMY = 21.0 + 1.5;
     if (minion.isEnemy) {
-        if (minion.group.position.z < CONFIG.MINION_MAX_Z_ENEMY) minion.group.position.z = CONFIG.MINION_MAX_Z_ENEMY;
-        if (minion.group.position.z > limZ) minion.group.position.z = limZ;
+        if (minion.group.position.z > MAX_Z_ENEMY) minion.group.position.z = MAX_Z_ENEMY;
     } else {
-        if (minion.group.position.z > CONFIG.MINION_MAX_Z_ALLY) minion.group.position.z = CONFIG.MINION_MAX_Z_ALLY;
-        if (minion.group.position.z < -limZ) minion.group.position.z = -limZ;
+        if (minion.group.position.z < MAX_Z_ALLY) minion.group.position.z = MAX_Z_ALLY;
     }
 }
 
@@ -164,7 +276,9 @@ const PLAYER_SHOP_CATALOG = {
         espada: { id: 'espada', emoji: '⚔️', name: 'Espada', desc: '+15% daño',           color: '#ff8844', cost: 100, apply: () => { attackDamage = Math.round(attackDamage * 1.15); } },
         arco:   { id: 'arco',   emoji: '🏹', name: 'Arco',   desc: '+12% vel. ataque',    color: '#ffaa44', cost: 90,  apply: () => { attackSpeed = Math.max(0.2, attackSpeed * 0.88); } },
         baculo: { id: 'baculo', emoji: '🔮', name: 'Báculo', desc: '+0.5 rango',          color: '#aa88ff', cost: 110, apply: () => { attackRange += 0.5; } },
-        daga:   { id: 'daga',   emoji: '🗡️', name: 'Daga',   desc: '+10% vel, +8% daño', color: '#ff4488', cost: 95,  apply: () => { playerSpeed *= 1.10; attackDamage = Math.round(attackDamage * 1.08); } }
+        daga:   { id: 'daga',   emoji: '🗡️', name: 'Daga',   desc: '+10% vel, +8% daño', color: '#ff4488', cost: 95,  apply: () => { playerSpeed *= 1.10; attackDamage = Math.round(attackDamage * 1.08); } },
+        escudo:   { id: 'escudo',   emoji: '🛡️', name: 'Escudo',   desc: '+20 defensa fisica', color: '#aabbdd', cost: 105, apply: () => { playerArmor += 20; updatePlayerHUD(); } },
+        pendientes: { id: 'pendientes', emoji: '📿', name: 'Pendientes', desc: '+20 defensa magica', color: '#cc88ff', cost: 105, apply: () => { playerMagicResist += 20; updatePlayerHUD(); } }
     }
 };
 
@@ -505,10 +619,14 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a1a);
 scene.fog = new THREE.Fog(0x0a0a1a, 35, 55);
 
+// Alejar un poco la vista: la camara es ORTOGRAFICA, asi que "alejar"
+// es bajar el zoom, no mover la distancia. zoom < 1 = se ve mas mundo.
+// 0.88 da ~13% mas de campo visible sin perder la accion de vista.
+// OJO: el resize (mas abajo) reconstruye el frustum pero respeta este zoom.
 const frustumSize = 8.0;
 const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.OrthographicCamera(-frustumSize * aspect / 2, frustumSize * aspect / 2, frustumSize / 2, -frustumSize / 2, 0.1, 100);
-camera.zoom = 1.0;
+camera.zoom = 0.88;
 
 const CAMERA_ANGLE_RAD = CONFIG.camaraAngulo * Math.PI / 180;
 const CAMERA_OFFSET = new THREE.Vector3(
@@ -730,8 +848,8 @@ function procesarLanes() {
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
-        createTower(4.0, 18, true, 1);
-        createTower(4.0, 6, true, 2);
+        createTower(2.5, 18, true, 1);
+        createTower(2.5, 6, true, 2);
     }
     inicializarCamaraFija();
 }
@@ -1171,17 +1289,41 @@ class TowerProjectile {
         const geo = new THREE.SphereGeometry(0.12, 8, 8);
         const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8 });
         this.mesh = new THREE.Mesh(geo, mat);
-        this.mesh.position.copy(startPos); this.mesh.position.y = 0.3;
+        // TAREA B: el disparo nace EN LO ALTO de la torre.
+        // Antes: this.mesh.position.copy(startPos) seguido de .y = 0.3,
+        // que machacaba la altura del firePoint y hacia que la torre
+        // disparase desde los pies. Aqui se respeta el origen real.
+        this.mesh.position.copy(startPos);
+        this.startY = startPos.y;
+        // El objetivo vuela a la altura del pecho de un minion, no a ras de suelo.
+        this.targetY = GROUND_Y + 0.45;
+        this.arcHeight = CONFIG.TOWER_SHOT_ARC_HEIGHT;
+        this.travelled = 0;
+        this.totalDist = this.mesh.position.distanceTo(
+            new THREE.Vector3(target.group.position.x, this.targetY, target.group.position.z)
+        );
         scene.add(this.mesh);
     }
 
     update(delta) {
         if (!this.active) return;
         if (!this.targetRef || !this.targetRef.group || this.targetRef.isDead) { this.active = false; scene.remove(this.mesh); return; }
-        const tp = this.targetRef.group.position.clone(); tp.y = 0.3;
-        const dir = new THREE.Vector3().subVectors(tp, this.mesh.position); dir.y = 0; dir.normalize();
-        this.mesh.position.x += dir.x * this.speed * delta;
-        this.mesh.position.z += dir.z * this.speed * delta;
+        // Objetivo a la altura del pecho, no a 0.3 (que era el bug del suelo).
+        const tp = new THREE.Vector3(this.targetRef.group.position.x, this.targetY, this.targetRef.group.position.z);
+        const dx = tp.x - this.mesh.position.x;
+        const dz = tp.z - this.mesh.position.z;
+        const flatDist = Math.sqrt(dx * dx + dz * dz);
+        if (flatDist > 0.0001) {
+            const step = this.speed * delta;
+            this.mesh.position.x += (dx / flatDist) * step;
+            this.mesh.position.z += (dz / flatDist) * step;
+            this.travelled += step;
+        }
+        // Arco balistico: sube al salir y baja al llegar.
+        // t=0 al nacer (y=startY) y t=1 al impactar (y=targetY).
+        const t = this.totalDist > 0.001 ? Math.min(1, this.travelled / this.totalDist) : 1;
+        const baseY = this.startY + (this.targetY - this.startY) * t;
+        this.mesh.position.y = baseY + Math.sin(t * Math.PI) * this.arcHeight;
         if (this.mesh.position.distanceTo(this.targetRef.group.position) < 0.8) this.hit();
         if (Math.abs(this.mesh.position.x) > 20 || Math.abs(this.mesh.position.z) > 30) { this.active = false; scene.remove(this.mesh); }
     }
@@ -1194,7 +1336,7 @@ class TowerProjectile {
             let reward = 0;
             const deathPosition = this.mesh.position.clone();
             if (this.targetRef.type === 'player') {
-                playerTakeDamage(this.damage);
+                playerTakeDamage(this.damage, DMG_MAGIC);
                 if (isAITrainingMode) playerAILastDamageTime = gameTime;
             } else if (this.targetRef.type === 'enemy_axie' && enemyAxie) {
                 const prev = enemyAxie.health;
@@ -1208,6 +1350,7 @@ class TowerProjectile {
             } else {
                 this.targetRef.health -= this.damage;
                 if (this.targetRef.updateHealthBar) this.targetRef.updateHealthBar();
+                if (this.targetRef.flashHit) this.targetRef.flashHit();
                 if (this.targetRef.health <= 0) {
                     targetDied = true;
                     if (this.targetRef.type === 'tower') { reward = ECONOMY.REWARD_TOWER_KILL; if (this.targetRef.position) deathPosition.copy(this.targetRef.position); }
@@ -1278,6 +1421,7 @@ class PlayerProjectile {
         } else if (this.targetRef.isEnemy === true) {
             this.targetRef.health -= this.damage;
             if (this.targetRef.updateHealthBar) this.targetRef.updateHealthBar();
+            if (this.targetRef.flashHit) this.targetRef.flashHit();
             if (window.currentTarget === this.targetRef) window.showTarget(this.targetRef);
             if (this.targetRef.health <= 0) {
                 targetDied = true;
@@ -1395,6 +1539,10 @@ class AxieTower {
             this.health = 0; this.isDead = true; this.group.visible = false;
             for (const p of this.projectiles) { p.active = false; scene.remove(p.mesh); }
             this.projectiles = [];
+            // TAREA C: contabilizar la torre caida para desbloquear el
+            // minion grande del bando contrario.
+            if (this.isEnemy) towersEnemyLost.ally++;
+            else towersEnemyLost.enemy++;
         }
     }
 
@@ -1441,6 +1589,10 @@ class AxieTower {
 }
 
 const towers = [];
+// TAREA C: torres perdidas por bando. Cuando un bando pierde sus 2 torres,
+// el bando contrario empieza a mandar 1 minion grande por oleada.
+const towersEnemyLost = { ally: 0, enemy: 0 };
+const TOWERS_TO_UNLOCK_BIG = 2;
 function createTower(x, z, isEnemy = false, tier = 1) {
     const tower = new AxieTower(x, z, isEnemy, tier);
     towers.push(tower);
@@ -1577,19 +1729,35 @@ class Minion {
         this.tipo = tipo;
         this.formationIndex = formationIndex;
         this.minionType = tipo;
-        this.maxHealth = tipo === 'mage' ? 60 : 100;
+
+        // TAREA D: el minion grande ('big') es un melee potenciado.
+        // Se calcula todo desde el melee base para que si ajustas el melee,
+        // el grande siga escalando de forma coherente.
+        const esBig = tipo === 'big';
+        this.esBig = esBig;
+        const MELEE_HP = 100;
+        const MELEE_DMG = 10;
+        const MELEE_SEG = 6;
+        const MELEE_SEG_HP = 17;
+
+        this.maxHealth = tipo === 'mage' ? 60
+            : (esBig ? MELEE_HP * CONFIG.BIG_MINION_HP_MULT : MELEE_HP);
         this.health = this.maxHealth;
-        this.speed = tipo === 'melee' ? CONFIG.meleeSpeed : CONFIG.mageSpeed;
+        this.speed = tipo === 'melee' ? CONFIG.meleeSpeed
+            : (esBig ? CONFIG.meleeSpeed * CONFIG.BIG_MINION_SPEED_MULT : CONFIG.mageSpeed);
         this.direction = isEnemy ? -1 : 1;
-        this.attackDamage = tipo === 'mage' ? 15 : 10;
+        this.attackDamage = tipo === 'mage' ? 15
+            : (esBig ? MELEE_DMG * CONFIG.BIG_MINION_DMG_MULT : MELEE_DMG);
         this.attackRange = tipo === 'mage' ? 4.0 : 1.5;
         this.attackCooldown = 0;
         this.attackSpeed = tipo === 'mage' ? 1.5 : 1.0;
         this.state = 'move';
         this.target = null;
         this.isDead = false;
-        this.segments = tipo === 'mage' ? 3 : 6;
-        this.hpPerSegment = tipo === 'mage' ? 20 : 17;
+        // El grande lleva mas segmentos de barra para que se lea su tanqueidad.
+        this.segments = tipo === 'mage' ? 3 : (esBig ? 10 : MELEE_SEG);
+        this.hpPerSegment = tipo === 'mage' ? 20
+            : (esBig ? (this.maxHealth / 10) : MELEE_SEG_HP);
         this.currentVisibleSegments = this.segments;
         this.type = 'minion';
         this.reevaluationTimer = 0;
@@ -1603,38 +1771,57 @@ class Minion {
         this.mixer = null;
         this.glbModel = null;
 
+        // --- Estado de combate visible ---
+        this.attackAnimTimer = 0;   // temporizador de la animacion de golpe
+        this.attackLungeT = 0;      // temporizador del lanzon del melee
+        this.hitFlashTimer = 0;     // temporizador del destello rojo al recibir dano
+        this._currentAction = null;
+
         this.combatOffsetX = 0;
         this.combatOffsetZ = 0;
-        if (tipo === 'melee') {
+        if (tipo === 'melee' || esBig) {
+            // El grande va por el centro del carril y no se pega a los muros.
             const meleeSlots = [0, -1.0, 1.0, -2.0, 2.0];
-            this.combatOffsetX = meleeSlots[formationIndex % meleeSlots.length] || 0;
+            this.combatOffsetX = esBig ? 0 : (meleeSlots[formationIndex % meleeSlots.length] || 0);
             this.combatOffsetZ = 0;
         } else {
             const mageSlots = [0, -1.2, 1.2];
             this.combatOffsetX = mageSlots[(formationIndex - 5) % mageSlots.length] || 0;
             this.combatOffsetZ = isEnemy ? -2.5 : 2.5;
         }
-        this.mySlotX = this.combatOffsetX;
+        // El slot es un desplazamiento lateral relativo al bando: el
+        // enemigo avanza hacia Z- (rotado 180 grados), asi que su lado del
+        // mundo es el contrario. Sin espejar, los dos bandos se apinaban
+        // en la misma mitad del carril y el reparto se veia torcido.
+        this.mySlotX = isEnemy ? -this.combatOffsetX : this.combatOffsetX;
         this.formationSet = false;
         this.deployProgress = 0;
 
         this.group = new THREE.Group();
         this.group.userData.targetRef = this;
 
-        const usarGLB = isEnemy && tipo === 'mage';
-        if (usarGLB) {
-            this.loadMinionGLB(tipo);
-        } else {
-            this.buildProceduralModel(isEnemy);
+        // SIN GLB: mage y melee usan SIEMPRE el modelo procedural propio.
+        // El mage se distingue por color, capucha, baculo y orbe; el melee por
+        // casco, escudo y espada. Asi los dos bandos se ven igual de bien.
+        this.buildProceduralModel(isEnemy);
+        {
+            // La barra de vida escala con el minion para no quedar descolgada
             const texture = getHealthBarTexture(this.segments, this.segments, this.isEnemy);
             const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
             const sprite = new THREE.Sprite(spriteMat);
             sprite.scale.set(0.7, 0.15, 1);
-            sprite.position.y = 0.65;
             sprite.renderOrder = 999;
             this.group.add(sprite);
             this.spriteMat = spriteMat;
+            this.healthBarSprite = sprite;
         }
+
+        // Escala global del minion. El modelo esta construido a escala 1.0 =
+        // 1.10 de alto, y el Axie mide 1.90: queda al 58%, proporcion de LoL.
+        // TAREA D: el minion grande multiplica esa escala.
+        const s = CONFIG.MINION_SCALE * (esBig ? CONFIG.BIG_MINION_SCALE : 1);
+        this.group.scale.setScalar(s);
+        if (this.healthBarSprite) this.healthBarSprite.position.y = 0.66 / s;
 
         this.group.rotation.y = isEnemy ? Math.PI : 0;
         this.group.position.set(x, GROUND_Y - 0.5, z);
@@ -1642,10 +1829,12 @@ class Minion {
         this.mesh = this.group;
     }
 
+    // [DESACTIVADO] Los minions ya NO usan GLB: mage y melee van con modelo
+    // procedural propio. Este metodo queda sin uso a proposito, no se llama.
     loadMinionGLB(tipo) {
         const loader = sharedGLTFLoader;
         const isMage = tipo === 'mage';
-        const targetHeight = isMage ? 0.65 : CONFIG.MINION_GLB_HEIGHT;
+        const targetHeight = isMage ? 0.65 : 1.10;
 
         loader.load(CONFIG.MINION_GLB_MAGE_ENEMY, (gltf) => {
             while (this.group.children.length > 0) this.group.remove(this.group.children[0]);
@@ -1675,17 +1864,32 @@ class Minion {
 
             this.mixer = new THREE.AnimationMixer(model);
             this.actions = {};
-            const walkPath = CONFIG.MAGE_GLB_WALK;
-            if (walkPath) {
-                sharedGLTFLoader.load(walkPath, (walkGltf) => {
-                    if (walkGltf.animations && walkGltf.animations[0]) {
-                        const action = this.mixer.clipAction(walkGltf.animations[0]);
+            // --- Animaciones del mage: walk + idle + attack ---
+            // walk/idle vienen en archivos GLB separados (así los exportaste).
+            // attack tambien existe (mage2_attack.glb) y antes NO se usaba.
+            const clipSources = [
+                ['walk',   CONFIG.MAGE_GLB_WALK],
+                ['idle',   CONFIG.MAGE_GLB_IDLE],
+                ['attack', CONFIG.MAGE_GLB_ATTACK],
+            ];
+            clipSources.forEach(([name, path]) => {
+                if (!path) return;
+                sharedGLTFLoader.load(path, (clipGltf) => {
+                    if (!clipGltf.animations || !clipGltf.animations.length) return;
+                    if (!this.mixer) return; // el minion ya murio/limpio
+                    const action = this.mixer.clipAction(clipGltf.animations[0]);
+                    if (name === 'attack') {
+                        action.setLoop(THREE.LoopOnce);
+                        action.clampWhenFinished = true;
+                    } else {
                         action.setLoop(THREE.LoopRepeat);
-                        this.actions.walk = action;
-                        action.play();
                     }
-                });
-            }
+                    this.actions[name] = action;
+                    // Estado inicial: andando
+                    if (name === 'walk') action.play();
+                }, undefined, () => { /* sin ese clip: no pasa nada */ });
+            });
+            this._currentAction = 'walk';
 
             const texture = getHealthBarTexture(this.segments, this.segments, this.isEnemy);
             const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
@@ -1755,21 +1959,379 @@ class Minion {
         });
     }
 
+    // =========================================
+    // MODELO PROCEDURAL DE LOS MINIONS (unico modelo: no hay GLB)
+    //   - melee: armadura, casco con visor, escudo y ESPADA
+    //   - mage:  tunica, capucha, orbe brillante y BACULO
+    // Se mantiene el pivote en el origen (pies a y=0) porque el gesto de
+    // ataque empuja el cuerpo hacia delante en Z desde aqui.
+    // =========================================
     buildProceduralModel(isEnemy) {
-        const scale = 0.5;
-        const lightColor = isEnemy ? (this.tipo === 'mage' ? 0xdd66cc : 0xff5555) : (this.tipo === 'mage' ? 0x66ccff : 0x5588ff);
-        const bodyGeo = new THREE.SphereGeometry(0.3 * scale, 8, 8);
-        const bodyMat = new THREE.MeshStandardMaterial({ color: lightColor, roughness: 0.6 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.scale.set(0.9, 1.2, 0.8);
-        body.position.y = 0.5 * scale;
-        body.userData.targetRef = this;
-        this.group.add(body);
-        const headGeo = new THREE.SphereGeometry(0.22 * scale, 8, 8);
-        const head = new THREE.Mesh(headGeo, bodyMat);
-        head.position.set(0, 0.9 * scale, 0);
-        head.userData.targetRef = this;
-        this.group.add(head);
+        if (this.tipo === 'mage') return this.buildMageModel(isEnemy);
+        // TAREA D: el grande reutiliza el cuerpo del melee para que la
+        // silueta sea reconocible, y se marca aparte con la corona.
+        const modelo = this.buildMeleeModel(isEnemy);
+        if (this.tipo === 'big') this.buildBigMinionCrest(isEnemy);
+        return modelo;
+    }
+
+    // TAREA D: marca visual del minion grande sobre el cuerpo del melee.
+    // Corona + aro luminoso. Se anade al cuerpo (bodyRoot) si existe, para
+    // que herede la animacion de andar; si no, al grupo raiz.
+    buildBigMinionCrest(isEnemy) {
+        const colorCrest = isEnemy ? 0xffcc33 : 0xffe066;
+        const colorAura  = isEnemy ? 0xff5533 : 0x55ccff;
+        const matCrest = new THREE.MeshStandardMaterial({
+            color: colorCrest, metalness: 0.9, roughness: 0.25,
+            emissive: colorCrest, emissiveIntensity: 0.55
+        });
+        const matAura = new THREE.MeshBasicMaterial({
+            color: colorAura, transparent: true, opacity: 0.35, side: THREE.DoubleSide
+        });
+        const parent = this.bodyRoot || this.group;
+
+        // Corona de 5 puntas sobre la cabeza (la cabeza del melee esta a 0.975)
+        const corona = new THREE.Group();
+        corona.position.y = 1.05;
+        for (let i = 0; i < 5; i++) {
+            const punta = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.11, 5), matCrest);
+            const ang = (i / 5) * Math.PI * 2;
+            punta.position.set(Math.cos(ang) * 0.075, 0, Math.sin(ang) * 0.075);
+            corona.add(punta);
+        }
+        parent.add(corona);
+        this.coronaRoot = corona;
+
+        // Aro luminoso a los pies: se ve de lejos y lee el bando.
+        const aro = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.46, 20), matAura);
+        aro.rotation.x = -Math.PI / 2;
+        aro.position.y = 0.02;
+        parent.add(aro);
+        this.auraRing = aro;
+        this.auraMat = matAura;
+    }
+    
+    // =========================================
+    // MODELO PROCEDURAL DEL MELEE
+    // Humanoide completo a escala 1.0 = 1.10 de alto, proporcion ~1:6.5.
+    // Antes: 0.85 de alto, cabezon, sin brazos y sin cuello. Se veia como
+    // un juguete al lado del Axie (1.90).
+    // Pivote en el origen (pies a y=0): el gesto empuja el cuerpo en Z.
+    // El eje del brazo baja en Y para que el tajo barra de verdad el frente.
+    // =========================================
+    buildMeleeModel(isEnemy) {
+        const colorMain  = isEnemy ? 0xd93a3a : 0x3a7bd9;
+        const colorDark  = isEnemy ? 0x7a1a1a : 0x1a3f7a;
+        const colorMetal = 0x9aa4b0;
+        const colorGlow  = isEnemy ? 0xff5533 : 0x55ccff;
+
+        const matMain  = new THREE.MeshStandardMaterial({ color: colorMain,  metalness: 0.35, roughness: 0.55 });
+        const matDark  = new THREE.MeshStandardMaterial({ color: colorDark,  metalness: 0.4,  roughness: 0.6 });
+        const matMetal = new THREE.MeshStandardMaterial({ color: colorMetal, metalness: 0.85, roughness: 0.3 });
+        const matGlow  = new THREE.MeshStandardMaterial({ color: colorGlow, emissive: colorGlow, emissiveIntensity: 0.9, roughness: 0.4 });
+
+        // this.bodyRoot agrupa todo el cuerpo para poder empujarlo al atacar
+        const bodyRoot = new THREE.Group();
+        this.bodyRoot = bodyRoot;
+        this.group.add(bodyRoot);
+
+        const tag = (obj) => {
+            obj.traverse((n) => { if (n.isMesh) { n.userData.targetRef = this; n.castShadow = false; n.receiveShadow = false; } });
+            return obj;
+        };
+
+        // --- Piernas (0.00 -> 0.46) ---
+        for (const sx of [-1, 1]) {
+            const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.062, 0.26, 6), matDark);
+            thigh.position.set(sx * 0.095, 0.33, 0);
+            bodyRoot.add(tag(thigh));
+            const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.052, 0.23, 6), matMain);
+            shin.position.set(sx * 0.095, 0.115, 0);
+            bodyRoot.add(tag(shin));
+            // Bota
+            const boot = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.075, 0.17), matDark);
+            boot.position.set(sx * 0.095, 0.038, 0.025);
+            bodyRoot.add(tag(boot));
+        }
+
+        // --- Cadera + torso (0.46 -> 0.84) ---
+        const hips = new THREE.Mesh(new THREE.BoxGeometry(0.245, 0.10, 0.17), matDark);
+        hips.position.y = 0.485;
+        bodyRoot.add(tag(hips));
+
+        const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.15, 0.30, 8), matMain);
+        torso.position.y = 0.685;
+        bodyRoot.add(tag(torso));
+
+        // Peto
+        const chest = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.075), matDark);
+        chest.position.set(0, 0.715, 0.135);
+        bodyRoot.add(tag(chest));
+
+        // Nucleo brillante (lectura de bando a distancia)
+        const core = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), matGlow);
+        core.position.set(0, 0.715, 0.183);
+        bodyRoot.add(tag(core));
+
+        // --- Cuello (0.84 -> 0.90) — antes no existia: la cabeza flotaba ---
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.072, 0.085, 8), matDark);
+        neck.position.y = 0.875;
+        bodyRoot.add(tag(neck));
+
+        // --- Cabeza + casco (0.90 -> 1.07) ---
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.098, 10, 10), matMain);
+        head.position.y = 0.975;
+        bodyRoot.add(tag(head));
+
+        const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.111, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.62), matMetal);
+        helmet.position.y = 0.985;
+        bodyRoot.add(tag(helmet));
+
+        // Visor
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.032, 0.04), matGlow);
+        visor.position.set(0, 0.978, 0.09);
+        bodyRoot.add(tag(visor));
+
+        // Cresta del casco (es lo mas alto: 1.10)
+        const crest = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.10, 0.14), matDark);
+        crest.position.set(0, 1.075, -0.012);
+        bodyRoot.add(tag(crest));
+
+        // --- Hombreras ---
+        for (const sx of [-1, 1]) {
+            const pad = new THREE.Mesh(new THREE.SphereGeometry(0.098, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), matMetal);
+            pad.position.set(sx * 0.215, 0.815, 0);
+            pad.rotation.z = sx * 0.35;
+            bodyRoot.add(tag(pad));
+        }
+
+        // --- Brazo IZQUIERDO: sujeto, con escudo ---
+        const armL = new THREE.Group();
+        armL.position.set(-0.205, 0.795, 0);
+        bodyRoot.add(armL);
+
+        const upperL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.19, 6), matMain);
+        upperL.position.y = -0.095;
+        armL.add(tag(upperL));
+
+        const foreL = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.045, 0.17, 6), matDark);
+        foreL.position.y = -0.27;
+        armL.add(tag(foreL));
+
+        const handL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), matDark);
+        handL.position.y = -0.375;
+        armL.add(tag(handL));
+
+        // Escudo redondo en el antebrazo
+        const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.20, 0.038, 10), matDark);
+        shield.rotation.z = Math.PI / 2;
+        shield.position.set(-0.052, -0.25, 0.07);
+        armL.add(tag(shield));
+        const shieldBoss = new THREE.Mesh(new THREE.SphereGeometry(0.052, 8, 8), matMetal);
+        shieldBoss.position.set(-0.075, -0.25, 0.07);
+        armL.add(tag(shieldBoss));
+        const shieldRim = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.017, 6, 14), matMetal);
+        shieldRim.rotation.y = Math.PI / 2;
+        shieldRim.position.set(-0.052, -0.25, 0.07);
+        armL.add(tag(shieldRim));
+
+        // --- Brazo DERECHO: pivote del arma ---
+        // El pivote del hombro va en y=0.795 y el arma al final del antebrazo,
+        // asi el tajo baja en Y y barre el frente de verdad.
+        const armRoot = new THREE.Group();
+        armRoot.position.set(0.205, 0.795, 0);
+        bodyRoot.add(armRoot);
+        this.armRoot = armRoot;
+
+        const upperR = new THREE.Mesh(new THREE.CylinderGeometry(0.057, 0.052, 0.21, 6), matMain);
+        upperR.position.y = -0.105;
+        armRoot.add(tag(upperR));
+
+        const foreR = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.047, 0.19, 6), matDark);
+        foreR.position.y = -0.30;
+        armRoot.add(tag(foreR));
+
+        const handR = new THREE.Mesh(new THREE.SphereGeometry(0.054, 8, 8), matDark);
+        handR.position.y = -0.425;
+        armRoot.add(tag(handR));
+
+        // --- Espada, empunada al final del brazo ---
+        const swordRoot = new THREE.Group();
+        swordRoot.position.set(0, -0.44, 0.015);
+        armRoot.add(swordRoot);
+        this.swordRoot = swordRoot;
+
+        const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.115, 6), matDark);
+        grip.position.y = 0.035;
+        swordRoot.add(tag(grip));
+        const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.031, 8, 8), matMetal);
+        pommel.position.y = -0.03;
+        swordRoot.add(tag(pommel));
+        const guard = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.028, 0.042), matMetal);
+        guard.position.y = 0.105;
+        swordRoot.add(tag(guard));
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.52, 0.022), matMetal);
+        blade.position.y = 0.385;
+        swordRoot.add(tag(blade));
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.051, 0.10, 4), matMetal);
+        tip.position.y = 0.695;
+        tip.rotation.y = Math.PI / 4;
+        swordRoot.add(tag(tip));
+
+        // Reposo: el arma apunta al frente y algo hacia abajo
+        swordRoot.rotation.x = -0.35;
+    }
+
+    // =========================================
+    // MODELO PROCEDURAL DEL MAGE
+    // Tunica + capucha + orbe brillante + baculo. Sustituye al GLB mage2.
+    // Escala 1.0 = 1.10 de alto (58% del Axie), igual que el melee, para que
+    // la oleada se lea pareja. Antes media 0.82: un cucurucho diminuto.
+    // =========================================
+    buildMageModel(isEnemy) {
+        const colorRobe  = isEnemy ? 0x8e3fbf : 0x3f7fbf;
+        const colorDark  = isEnemy ? 0x4a1f6b : 0x1f4a6b;
+        const colorTrim  = isEnemy ? 0xd966ff : 0x66ddff;
+        const colorWood  = 0x6b4a2f;
+
+        const matRobe = new THREE.MeshStandardMaterial({ color: colorRobe, metalness: 0.1, roughness: 0.8 });
+        const matDark = new THREE.MeshStandardMaterial({ color: colorDark, metalness: 0.15, roughness: 0.75 });
+        const matTrim = new THREE.MeshStandardMaterial({ color: colorTrim, emissive: colorTrim, emissiveIntensity: 0.7, roughness: 0.4 });
+        const matWood = new THREE.MeshStandardMaterial({ color: colorWood, metalness: 0.2, roughness: 0.8 });
+        // El orbe se guarda para poder hacerlo brillar al atacar
+        const matOrb  = new THREE.MeshStandardMaterial({ color: colorTrim, emissive: colorTrim, emissiveIntensity: 0.9, roughness: 0.25 });
+        this.orbMat = matOrb;
+
+        const bodyRoot = new THREE.Group();
+        this.bodyRoot = bodyRoot;
+        this.group.add(bodyRoot);
+
+        const tag = (obj) => {
+            obj.traverse((n) => { if (n.isMesh) { n.userData.targetRef = this; n.castShadow = false; n.receiveShadow = false; } });
+            return obj;
+        };
+
+        // --- Tunica: cuerpo entero, de los pies al cuello (0.00 -> 0.85) ---
+        const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.335, 0.80, 10), matRobe);
+        robe.position.y = 0.42;
+        bodyRoot.add(tag(robe));
+
+        // Dobladillo oscuro del borde
+        const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.342, 0.352, 0.09, 10), matDark);
+        hem.position.y = 0.055;
+        bodyRoot.add(tag(hem));
+
+        // Aberturas de la tunica (dos pliegues verticales)
+        for (const sx of [-1, 1]) {
+            const slit = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.62, 0.03), matDark);
+            slit.position.set(sx * 0.20, 0.42, 0.10);
+            slit.rotation.z = sx * 0.13;
+            bodyRoot.add(tag(slit));
+        }
+
+        // --- Cinturon luminoso (lectura de bando a distancia) ---
+        const belt = new THREE.Mesh(new THREE.TorusGeometry(0.203, 0.026, 6, 14), matTrim);
+        belt.rotation.x = Math.PI / 2;
+        belt.position.y = 0.615;
+        bodyRoot.add(tag(belt));
+
+        // --- Cuello / hombros (0.85 -> 0.92) ---
+        const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.108, 0.152, 0.10, 10), matDark);
+        collar.position.y = 0.885;
+        bodyRoot.add(tag(collar));
+
+        // --- Cabeza encapuchada (0.92 -> 1.07) ---
+        // Es un cono bajo que se hunde en el cuello: asi no queda hueco.
+        const hood = new THREE.Mesh(new THREE.ConeGeometry(0.152, 0.29, 10), matDark);
+        hood.position.y = 1.01;
+        bodyRoot.add(tag(hood));
+
+        // Hueco oscuro de la cara
+        const face = new THREE.Mesh(new THREE.SphereGeometry(0.088, 8, 8), matDark);
+        face.position.set(0, 1.005, 0.055);
+        bodyRoot.add(tag(face));
+
+        // Dos ojos brillantes
+        for (const sx of [-1, 1]) {
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.029, 6, 6), matTrim);
+            eye.position.set(sx * 0.048, 1.015, 0.108);
+            bodyRoot.add(tag(eye));
+        }
+
+        // Punta de la capucha caida hacia atras
+        const hoodTip = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.20, 8), matDark);
+        hoodTip.position.set(0, 1.10, -0.075);
+        hoodTip.rotation.x = 0.72;
+        bodyRoot.add(tag(hoodTip));
+
+        // Hombreras de la tunica
+        for (const sx of [-1, 1]) {
+            const pad = new THREE.Mesh(new THREE.SphereGeometry(0.105, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), matRobe);
+            pad.position.set(sx * 0.205, 0.875, 0);
+            pad.rotation.z = sx * 0.4;
+            bodyRoot.add(tag(pad));
+        }
+
+        // --- Brazo IZQUIERDO: suelto, con la manga ancha del mago ---
+        const armL = new THREE.Group();
+        armL.position.set(-0.195, 0.85, 0);
+        armL.rotation.z = 0.22;
+        bodyRoot.add(armL);
+
+        const sleeveL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.088, 0.30, 8), matRobe);
+        sleeveL.position.y = -0.15;
+        armL.add(tag(sleeveL));
+
+        const cuffL = new THREE.Mesh(new THREE.CylinderGeometry(0.092, 0.092, 0.045, 8), matDark);
+        cuffL.position.y = -0.30;
+        armL.add(tag(cuffL));
+
+        const handL = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), matDark);
+        handL.position.y = -0.35;
+        armL.add(tag(handL));
+
+        // --- Brazo DERECHO: pivote del baculo ---
+        const armRoot = new THREE.Group();
+        armRoot.position.set(0.195, 0.85, 0);
+        bodyRoot.add(armRoot);
+        this.armRoot = armRoot;
+
+        const sleeveR = new THREE.Mesh(new THREE.CylinderGeometry(0.057, 0.09, 0.32, 8), matRobe);
+        sleeveR.position.y = -0.16;
+        armRoot.add(tag(sleeveR));
+
+        const cuffR = new THREE.Mesh(new THREE.CylinderGeometry(0.094, 0.094, 0.048, 8), matDark);
+        cuffR.position.y = -0.32;
+        armRoot.add(tag(cuffR));
+
+        const handR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), matDark);
+        handR.position.y = -0.375;
+        armRoot.add(tag(handR));
+
+        // --- Baculo ---
+        const staffRoot = new THREE.Group();
+        staffRoot.position.set(0, -0.385, 0.02);
+        armRoot.add(staffRoot);
+        this.staffRoot = staffRoot;
+
+        // El asta sube desde la mano y baja hasta casi el suelo
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.027, 0.95, 6), matWood);
+        shaft.position.y = 0.26;
+        staffRoot.add(tag(shaft));
+
+        // Aro de la punta
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.019, 6, 14), matTrim);
+        ring.position.y = 0.78;
+        staffRoot.add(tag(ring));
+
+        // El orbe flotando dentro del aro
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.063, 10, 10), matOrb);
+        orb.position.y = 0.78;
+        staffRoot.add(tag(orb));
+        this.orb = orb;
+
+        // Reposo: baculo ligeramente inclinado hacia delante
+        staffRoot.rotation.x = -0.15;
     }
 
     adjustWeightsOnKill(targetType) {
@@ -1806,9 +2368,189 @@ class Minion {
         }
     }
 
+    // =========================================
+    // ATAQUE VISIBLE
+    // Ya no hay GLB de minion: los dos tipos usan gesto procedural propio.
+    //   - melee: lanzon del cuerpo + tajo de espada
+    //   - mage:  eleva el baculo y lanza una descarga
+    // =========================================
+    triggerAttackAnim() {
+        this.attackAnimTimer = CONFIG.MINION_ATTACK_ANIM_TIME;
+
+        // Rama de animaciones GLB: solo aplica si algun dia se vuelven a usar GLB
+        if (this.actions && this.actions.attack) {
+            if (this._currentAction !== 'attack') {
+                const prev = this.actions[this._currentAction];
+                if (prev && prev !== this.actions.attack) prev.fadeOut(0.08);
+                const atk = this.actions.attack;
+                atk.reset();
+                atk.setEffectiveWeight(1);
+                atk.fadeIn(0.06).play();
+                this._currentAction = 'attack';
+            }
+            return;
+        }
+
+        // Gesto procedural (todos los minions actuales)
+        this.attackLungeT = CONFIG.MINION_ATTACK_ANIM_TIME;
+    }
+
+    // Aplica el gesto visual del golpe. Se llama desde update().
+    updateAttackVisual(delta) {
+        // Solo relevante si algun dia se vuelven a usar animaciones GLB
+        if (this.attackAnimTimer > 0) {
+            this.attackAnimTimer -= delta;
+            if (this.attackAnimTimer <= 0 && this._currentAction === 'attack') {
+                if (this.actions) {
+                    if (this.actions.attack) this.actions.attack.fadeOut(0.1);
+                    if (this.actions.walk) {
+                        this.actions.walk.reset();
+                        this.actions.walk.setEffectiveWeight(1);
+                        this.actions.walk.fadeIn(0.1).play();
+                    }
+                }
+                this._currentAction = 'walk';
+            }
+        }
+
+        // ---------------------------------------------------------
+        // Gesto de ataque procedural (melee y mage)
+        // t va de 1 -> 0. phase va de 0 -> 1.
+        // Ya no hay GLB de minion, asi que este es el UNICO gesto.
+        // ---------------------------------------------------------
+        if (this.attackLungeT > 0) {
+            this.attackLungeT -= delta;
+            const t = Math.max(0, this.attackLungeT) / CONFIG.MINION_ATTACK_ANIM_TIME; // 1 -> 0
+            const phase = 1 - t; // 0 -> 1
+            const swing = Math.sin(phase * Math.PI); // 0 -> 1 -> 0, pico a mitad
+
+            if (this.tipo === 'mage') {
+                // --- GESTO DEL MAGE: eleva el baculo y lo baja al lanzar ---
+                if (this.bodyRoot) {
+                    // Se yergue un poco al conjurar
+                    this.bodyRoot.position.z = swing * 0.10;
+                    this.bodyRoot.rotation.x = -swing * 0.12;
+                }
+                if (this.armRoot) {
+                    // El brazo se adelanta al frente (medido: no baja el orbe)
+                    this.armRoot.rotation.x = -0.15 * swing;
+                }
+                if (this.staffRoot) {
+                    // El baculo se extiende hacia el objetivo al soltar la descarga
+                    this.staffRoot.rotation.x = -0.15 + 0.50 * swing;
+                }
+                // El orbe brilla mas en el momento del golpe
+                if (this.orbMat) {
+                    this.orbMat.emissiveIntensity = 0.9 + 1.8 * swing;
+                }
+                if (this.attackLungeT <= 0) {
+                    if (this.bodyRoot) { this.bodyRoot.position.z = 0; this.bodyRoot.rotation.x = 0; }
+                    if (this.armRoot) this.armRoot.rotation.x = 0;
+                    if (this.staffRoot) this.staffRoot.rotation.x = -0.15;
+                    if (this.orbMat) this.orbMat.emissiveIntensity = 0.9;
+                }
+                return;
+            }
+
+            // --- GESTO DEL MELEE: lanzon del cuerpo + tajo de espada ---
+            const lunge = swing * CONFIG.MINION_MELEE_LUNGE;
+
+            if (this.bodyRoot) {
+                this.bodyRoot.position.z = lunge * 0.7;
+                this.bodyRoot.rotation.x = lunge * 0.35;
+            }
+            if (this.procBody && this.procHead) {
+                // Compatibilidad: modelos viejos de dos esferas
+                this.procBody.position.z = lunge * 0.6;
+                this.procHead.position.z = lunge * 0.6;
+            }
+
+            // --- Tajo de espada ---
+            if (this.armRoot && this.swordRoot) {
+                // Brazo: sube y baja
+                this.armRoot.rotation.x = -1.15 * swing;
+                // Espada: rota en abanico (de atras-arriba a adelante-abajo)
+                this.swordRoot.rotation.x = -0.35 - 1.55 * Math.sin(phase * Math.PI * 1.15);
+            }
+
+            if (this.attackLungeT <= 0) {
+                // Reposo: dejarlo TODO exactamente donde estaba
+                if (this.bodyRoot) {
+                    this.bodyRoot.position.z = 0;
+                    this.bodyRoot.rotation.x = 0;
+                }
+                if (this.procBody && this.procHead) {
+                    this.procBody.position.z = 0;
+                    this.procHead.position.z = 0;
+                }
+                if (this.armRoot) this.armRoot.rotation.x = 0;
+                if (this.swordRoot) this.swordRoot.rotation.x = -0.35;
+            }
+        }
+    }
+
+    // Destello rojo al recibir dano (feedback visual del impacto)
+    flashHit() {
+        this.hitFlashTimer = CONFIG.MINION_HIT_FLASH_TIME;
+        this.applyHitFlash(true);
+    }
+
+    applyHitFlash(on) {
+        if (this.glbModel) {
+            this.glbModel.traverse((n) => {
+                if (!n.isMesh || !n.material) return;
+                const mats = Array.isArray(n.material) ? n.material : [n.material];
+                mats.forEach((mat) => {
+                    if (!mat.emissive) return;
+                    if (on) {
+                        if (mat.userData._origEmissive === undefined) {
+                            mat.userData._origEmissive = mat.emissive.getHex();
+                        }
+                        mat.emissive.setHex(0xff2222);
+                        mat.emissiveIntensity = 1.0;
+                    } else if (mat.userData._origEmissive !== undefined) {
+                        mat.emissive.setHex(mat.userData._origEmissive);
+                        mat.emissiveIntensity = 1.0;
+                    }
+                    mat.needsUpdate = true;
+                });
+            });
+        } else {
+            this.group.traverse((n) => {
+                if (!n.isMesh || !n.material) return;
+                const mats = Array.isArray(n.material) ? n.material : [n.material];
+                mats.forEach((mat) => {
+                    if (!mat.emissive) return;
+                    if (on) {
+                        if (mat.userData._origEmissive === undefined) {
+                            mat.userData._origEmissive = mat.emissive.getHex();
+                        }
+                        mat.emissive.setHex(0xff2222);
+                        mat.emissiveIntensity = 1.0;
+                    } else if (mat.userData._origEmissive !== undefined) {
+                        mat.emissive.setHex(mat.userData._origEmissive);
+                    }
+                    mat.needsUpdate = true;
+                });
+            });
+        }
+    }
+
+    updateHitFlash(delta) {
+        if (this.hitFlashTimer > 0) {
+            this.hitFlashTimer -= delta;
+            if (this.hitFlashTimer <= 0) {
+                this.hitFlashTimer = 0;
+                this.applyHitFlash(false);
+            }
+        }
+    }
+
     update(delta, aliados, enemigos, towers, playerModel) {
         if (this.isDead || gameFinished) return;
         if (this.mixer) this.mixer.update(delta);
+        this.updateAttackVisual(delta);
+        this.updateHitFlash(delta);
         this.reevaluationTimer += delta;
 
         if (isFirstWave && this.ghostTimer > 0) {
@@ -1934,16 +2676,21 @@ class Minion {
 
             const distToAttack = Math.max(0, dist - attackRange);
             const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
-            this.deployProgress += (deployTarget - this.deployProgress) * Math.min(1, 2.5 * delta);
+            // Despliegue lateral progresivo. Con 2.5 el minion se abria de golpe
+        // al entrar en rango (tiron brusco); 1.1 lo reparte a lo largo de
+        // ~1.5 s, que es el amago ordenado de los minions de LoL.
+        this.deployProgress += (deployTarget - this.deployProgress) * Math.min(1, 1.1 * delta);
             if (this.deployProgress < 0.01) this.deployProgress = 0;
             if (this.deployProgress > 0.99) this.deployProgress = 1;
 
             if (dist <= attackRange) {
                 this.state = 'attack';
+                // Animación/gesto de ataque (se refresca cada tick, el temporizador la corta)
+                this.triggerAttackAnim();
                 if (this.attackCooldown <= 0) {
                     registerFactionAttack(this.isEnemy ? 'enemy' : 'ally', finalTarget);
                     if (finalTarget._isAxie || finalTarget.type === 'player' || finalTarget.type === 'enemy_axie') {
-                        if (finalTarget.type === 'player') playerTakeDamage(this.attackDamage);
+                        if (finalTarget.type === 'player') playerTakeDamage(this.attackDamage, DMG_PHYSICAL);
                         else if (finalTarget.type === 'enemy_axie' && typeof enemyAxieTakeDamage === 'function') enemyAxieTakeDamage(this.attackDamage);
                         this.attackCooldown = this.attackSpeed;
                     } else if (finalTarget.type === 'tower' || finalTarget.type === 'nexus') {
@@ -1953,6 +2700,8 @@ class Minion {
                         finalTarget.health -= this.attackDamage;
                         this.attackCooldown = this.attackSpeed;
                         if (finalTarget.updateHealthBar) finalTarget.updateHealthBar();
+                        // Feedback visual: el minion golpeado destella en rojo
+                        if (finalTarget.flashHit) finalTarget.flashHit();
                         if (finalTarget.health <= 0) {
                             this.memory.kills++;
                             this.adjustWeightsOnKill(finalTarget.type || 'minion');
@@ -1984,7 +2733,7 @@ class Minion {
             this.group.position.z = nz;
             this.group.position.x += (0 - this.group.position.x) * Math.min(1, 2 * delta);
             this.group.rotation.y = this.isEnemy ? Math.PI : 0;
-            this.deployProgress += (0 - this.deployProgress) * Math.min(1, 2 * delta);
+            this.deployProgress += (0 - this.deployProgress) * Math.min(1, 1.4 * delta);
         }
 
         clampMinionToLane(this);
@@ -2015,6 +2764,20 @@ let startTimer = CONFIG.SPAWN_DELAY;
 function getWaveComposition() {
     if (waveNumber === 1) return { melee: 5, mage: 3 };
     return { melee: 3, mage: 2 };
+}
+
+// TAREA C+D: decide si esta oleada debe incluir un minion grande.
+// Condicion: al bando contrario le han tirado sus 2 torres.
+// Tope duro: nunca mas de BIG_MINION_MAX_ALIVE vivos por bando.
+function shouldSpawnBigMinion(team) {
+    // team es el bando que lo RECIBE ('ally' o 'enemy').
+    // Sale cuando el bando RIVAL ha perdido sus 2 torres.
+    const rivalLost = team === 'ally' ? towersEnemyLost.enemy : towersEnemyLost.ally;
+    if (rivalLost < TOWERS_TO_UNLOCK_BIG) return false;
+    const alive = (team === 'ally' ? aliados : enemigos)
+        .filter(m => !m.isDead && m.tipo === 'big').length;
+    const queued = spawnQueue.filter(q => q.team === team && q.tipo === 'big').length;
+    return (alive + queued) < CONFIG.BIG_MINION_MAX_ALIVE;
 }
 
 function evaluateWaveOutcome() {
@@ -2145,7 +2908,36 @@ function spawnWave() {
         }
     }
 
+    // TAREA C+D: minion grande. Uno por bando y oleada, solo si al rival
+    // le han tirado las 2 torres, y con tope duro de 2 vivos por bando.
+    let bigAlly = false, bigEnemy = false;
+    if (shouldSpawnBigMinion('ally')) {
+        spawnQueue.push({
+            team: 'ally', tipo: 'big',
+            index: queueIndex,
+            delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z: NEXUS_Z_ALLY - 0.6,
+            formationRow: 0, formationCol: 0
+        });
+        queueIndex++;
+        bigAlly = true;
+    }
+    if (shouldSpawnBigMinion('enemy')) {
+        spawnQueue.push({
+            team: 'enemy', tipo: 'big',
+            index: queueIndex,
+            delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z: NEXUS_Z_ENEMY + 0.6,
+            formationRow: 0, formationCol: 0
+        });
+        queueIndex++;
+        bigEnemy = true;
+    }
+
     console.log(`🌊 [t=${gameTime.toFixed(2)}s] Oleada ${waveNumber}: ${comp.melee} melee + ${comp.mage} mage por equipo (formación desde nexos)`);
+    if (bigAlly || bigEnemy) {
+        console.log(`   ⭐ MINION GRANDE: aliado=${bigAlly ? 'SI' : 'no'} enemigo=${bigEnemy ? 'SI' : 'no'} (torres rivales caidas: aliado=${towersEnemyLost.enemy}, enemigo=${towersEnemyLost.ally})`);
+    }
 
     waveNumber++;
     waveCooldown = 0;
@@ -2192,6 +2984,25 @@ let isAttacking = false;
 let attackRange = CONFIG.attackRange;
 let attackDamage = CONFIG.attackDamage;
 let attackSpeed = CONFIG.attackSpeed;
+// --- Defensas del jugador (items de tienda) ---
+// Se aplican como reduccion porcentual: mitiga/(mitiga+100).
+// 0 -> 0% | 20 -> 16.7% | 40 -> 28.6% | 60 -> 37.5%
+let playerArmor = 0;        // defensa fisica (minions melee, Axie enemigo)
+let playerMagicResist = 0;  // defensa magica (proyectiles de los magos)
+
+// Tipos de dano. Solo hay dos fuentes claramente distinguibles:
+// los proyectiles de los magos son dano magico; el resto es fisico.
+const DMG_PHYSICAL = 'physical';
+const DMG_MAGIC = 'magic';
+
+// Mitigacion por defensa: mitiga / (mitiga + 100).
+// Escala suave: nunca llega a 100%, y el primer punto comprado ya se nota.
+function mitigarDano(damage, tipo = DMG_PHYSICAL) {
+    const defensa = (tipo === DMG_MAGIC) ? playerMagicResist : playerArmor;
+    if (defensa <= 0) return damage;
+    const factor = 1 - (defensa / (defensa + 100));
+    return Math.max(1, damage * factor);
+}
 let isAutoMovingToTarget = false;
 
 const raycaster = new THREE.Raycaster();
@@ -2241,6 +3052,7 @@ function loadSelectedAxie(axieId) {
                 if (name.includes('walk')) animWalk = mixer.clipAction(clip);
             });
             if (animIdle) animIdle.play();
+            attachAxieWeapon(playerModel, axieData);
             axieLoaded = true;
             currentAxieName = axieData.nombre;
             resolve();
@@ -2470,10 +3282,10 @@ function getPlayerRespawnTime() {
     return time;
 }
 
-function playerTakeDamage(damage) {
+function playerTakeDamage(damage, tipo = DMG_PHYSICAL) {
     if (isPlayerDead) return;
     if (!playerSpawned) return;
-    playerHealth -= damage;
+    playerHealth -= mitigarDano(damage, tipo);
     if (playerHealth < 0) playerHealth = 0;
     updatePlayerHUD();
     if (playerHealth <= 0) {
@@ -2625,6 +3437,7 @@ function spawnEnemyAxie() {
             if (name.includes('walk')) enemyAxieAnimWalk = enemyAxieMixer.clipAction(clip);
         });
         if (enemyAxieAnimIdle) { enemyAxieAnimIdle.play(); enemyAxieCurrentAnim = 'idle'; }
+        attachAxieWeapon(enemyAxieModel, randomAxie);
         const hb = createHealthBar(ENEMY_HEALTH_SEGMENTS, true);
         hb.sprite.position.set(0, 1.8, 0);
         enemyAxieModel.add(hb.sprite);
@@ -2847,13 +3660,14 @@ function enemyAxieAttack(target) {
     const isCrit = Math.random() < enemyAxieBonuses.critChance;
     const fd = Math.round(ENEMY_AXIE_ATTACK_DAMAGE * enemyAxieBonuses.damageMultiplier * (isCrit ? 2 : 1));
     if (target.type === 'player' || target.type === 'defend_player') {
-        playerTakeDamage(fd);
+        playerTakeDamage(fd, DMG_PHYSICAL);
         if (isPlayerDead) enemyAxieGold += 50;
         return;
     }
     if (target.ref && target.ref.health !== undefined) {
         target.ref.health -= fd;
         if (target.ref.updateHealthBar) target.ref.updateHealthBar();
+        if (target.ref.flashHit) target.ref.flashHit();
         if (target.ref.health <= 0 && target.ref.die) {
             target.ref.die('enemy_axie');
             if (target.type === 'minion') enemyAxieGold += 15;
@@ -3123,6 +3937,98 @@ function resetEnemyAxie() {
     enemyAxieBrain.stats._lastTargetType = null;
     enemyAxiePotionCount = 0;
     enemyAxiePotionCooldown = 0;
+}
+
+// ============================================================
+// TAREA A: colision con estructuras (tienda, nexo, torres)
+// ============================================================
+// Antes: resolveMinionCollisions() solo comprobaba minion contra minion.
+// La tienda, el nexo y las torres no estaban en ninguna lista de colision,
+// asi que los minions (y los Axies) las atravesaban como si no existieran.
+//
+// Ahora: cada entidad movil se empuja fuera del radio de cada estructura.
+// El empuje es posicional (no fisica real): la saca por el borde del
+// circulo en direccion radial. Es barato y suficiente para que las
+// estructuras tengan cuerpo.
+
+// Radio horizontal de cada estructura en unidades del mundo.
+const STRUCTURE_RADII = {
+    shop:  { ally: 1.45, enemy: 1.45 },
+    nexus: { ally: 2.05, enemy: 1.85 },
+    tower: { ally: 1.05, enemy: 1.25 },
+};
+
+// Radio del cuerpo de una entidad movil (minion o Axie).
+const ENTITY_BODY_RADIUS = 0.42;
+
+// Lista de estructuras vivas con su radio. Se reconstruye por frame a
+// proposito: si una torre muere, deja de empujar al instante sin cache.
+function getStructureColliders() {
+    const list = [];
+    for (const t of towers) {
+        if (!t || t.isDead || !t.group) continue;
+        const base = t.isEnemy ? STRUCTURE_RADII.tower.enemy : STRUCTURE_RADII.tower.ally;
+        const tierBonus = t.tier === 2 ? 0.12 : 0;
+        list.push({ ref: t, pos: t.group.position, radius: base + tierBonus });
+    }
+    if (nexusAliado && !nexusAliado.isDead && nexusAliado.group) {
+        list.push({ ref: nexusAliado, pos: nexusAliado.group.position, radius: STRUCTURE_RADII.nexus.ally });
+    }
+    if (nexusEnemigo && !nexusEnemigo.isDead && nexusEnemigo.group) {
+        list.push({ ref: nexusEnemigo, pos: nexusEnemigo.group.position, radius: STRUCTURE_RADII.nexus.enemy });
+    }
+    if (shopAliada && shopAliada.group) {
+        list.push({ ref: shopAliada, pos: shopAliada.group.position, radius: STRUCTURE_RADII.shop.ally });
+    }
+    if (shopEnemiga && shopEnemiga.group) {
+        list.push({ ref: shopEnemiga, pos: shopEnemiga.group.position, radius: STRUCTURE_RADII.shop.enemy });
+    }
+    return list;
+}
+
+// Saca una entidad del radio de una estructura si ha entrado.
+// Devuelve true si hubo que empujarla.
+function pushOutOfStructure(entity, collider) {
+    const dx = entity.group.position.x - collider.pos.x;
+    const dz = entity.group.position.z - collider.pos.z;
+    const minDist = collider.radius + ENTITY_BODY_RADIUS;
+    const dSq = dx * dx + dz * dz;
+
+    if (dSq >= minDist * minDist) return false;
+
+    let nx, nz;
+    if (dSq < 0.0001) {
+        // Justo en el centro: empuja en el eje del carril mirando al bando,
+        // asi nunca lo expulsa por detras del nexo.
+        nx = 0;
+        nz = entity.isEnemy ? 1 : -1;
+    } else {
+        const d = Math.sqrt(dSq);
+        nx = dx / d;
+        nz = dz / d;
+    }
+
+    entity.group.position.x = collider.pos.x + nx * minDist;
+    entity.group.position.z = collider.pos.z + nz * minDist;
+    return true;
+}
+
+// Aplica la colision de estructuras a una lista de entidades moviles.
+// Se llama despues de mover y antes de clampMinionToLane, para que el
+// clamp del carril sea siempre la ultima palabra.
+function applyStructureCollisions(entities) {
+    const colliders = getStructureColliders();
+    if (colliders.length === 0) return 0;
+    let pushed = 0;
+    for (const e of entities) {
+        if (!e || !e.group || e.isDead) continue;
+        if (e.type === 'tower' || e.type === 'nexus' || e.type === 'shop') continue;
+        for (const c of colliders) {
+            if (c.ref === e) continue;
+            if (pushOutOfStructure(e, c)) pushed++;
+        }
+    }
+    return pushed;
 }
 
 function resolveMinionCollisions(delta) {
@@ -3722,8 +4628,8 @@ function abandonGame() {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(4.0, 18, true, 1);
-    createTower(4.0, 6, true, 2);
+    createTower(2.5, 18, true, 1);
+    createTower(2.5, 6, true, 2);
     gameStarted = false;
     startTimer = CONFIG.SPAWN_DELAY;
     waveNumber = 1;
@@ -3997,8 +4903,8 @@ async function startAIGame(axieId) {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(4.0, 18, true, 1);
-    createTower(4.0, 6, true, 2);
+    createTower(2.5, 18, true, 1);
+    createTower(2.5, 6, true, 2);
     resetEnemyAxie();
     inicializarCamaraFija();
     resetDynamicCamera();
@@ -4116,6 +5022,125 @@ async function startGame(axieId) {
     startGameLoop();
 }
 
+// ============================================================
+// TELETRANSPORTE AL NEXO (tecla B) - tipo recall de LoL
+// ============================================================
+// Sin canalizacion: es instantaneo. Se pide un minimo de 1.5s entre usos
+// para que no se pueda usar como escape en mitad de un intercambio.
+let recallCooldown = 0;
+const RECALL_COOLDOWN = 1.5;
+
+function teletransporteAlNexo() {
+    if (recallCooldown > 0) {
+        console.log('⏳ Teletransporte en enfriamiento: ' + recallCooldown.toFixed(1) + 's');
+        return;
+    }
+    if (!playerModel || !smoothPlayerPos) return;
+
+    // Punto de llegada: junto al nexo aliado, desplazado hacia el carril.
+    // Se usa la posicion REAL del nexo si existe, con respaldo en el spawn.
+    let destinoX = playerSpawnPosition.x;
+    let destinoZ = playerSpawnPosition.z;
+    if (nexusAliado && nexusAliado.group) {
+        destinoX = nexusAliado.group.position.x;
+        destinoZ = nexusAliado.group.position.z + 2.2;   // delante del nexo
+    }
+    destinoX = Math.max(-17, Math.min(17, destinoX));
+    destinoZ = Math.max(-26, Math.min(26, destinoZ));
+
+    playerModel.position.set(destinoX, GROUND_Y, destinoZ);
+    smoothPlayerPos.set(destinoX, GROUND_Y, destinoZ);
+    smoothTargetPos.copy(smoothPlayerPos);
+    isMovingToTarget = false;
+    isAutoMovingToTarget = false;
+    targetPosition = null;
+
+    recallCooldown = RECALL_COOLDOWN;
+    console.log('🌀 Teletransporte al nexo -> x=' + destinoX.toFixed(2) + ' z=' + destinoZ.toFixed(2));
+}
+
+// ============================================================
+// MARCADOR (tecla Tab, mantenida)
+// ============================================================
+let marcadorElemento = null;
+
+function contarStructures() {
+    const vivos = { torresAliadas: 0, torresEnemigas: 0, torresAliadasTotal: 0, torresEnemigasTotal: 0 };
+    for (const t of towers) {
+        if (t.isEnemy) {
+            vivos.torresEnemigasTotal++;
+            if (!t.isDead) vivos.torresEnemigas++;
+        } else {
+            vivos.torresAliadasTotal++;
+            if (!t.isDead) vivos.torresAliadas++;
+        }
+    }
+    return vivos;
+}
+
+function filaMarcador(emoji, etiqueta, valor, color) {
+    return '<div style="display:flex;justify-content:space-between;gap:18px;padding:6px 0;font-size:14px;">' +
+        '<span style="color:#bbb;">' + emoji + ' ' + etiqueta + '</span>' +
+        '<span style="font-weight:bold;color:' + color + ';">' + valor + '</span></div>';
+}
+
+function mostrarMarcador() {
+    if (marcadorElemento) return;   // ya esta abierto
+
+    const st = contarStructures();
+    const hpHumano = Math.max(0, Math.round(playerHealth));
+    const hpAxie = Math.max(0, Math.round(enemyAxieHealth));
+
+    // Fila de la izquierda: jugador humano. Derecha: la IA enemiga.
+    const ladoJugador =
+        filaMarcador('🗡️', 'Daño de ataque', Math.round(attackDamage), '#ff8844') +
+        filaMarcador('🛡️', 'Defensa física', playerArmor, '#aabbdd') +
+        filaMarcador('📿', 'Defensa mágica', playerMagicResist, '#cc88ff') +
+        filaMarcador('⚡', 'Vel. ataque', attackSpeed.toFixed(2) + 's', '#ffaa44') +
+        filaMarcador('🏹', 'Rango', attackRange.toFixed(1), '#aa88ff') +
+        filaMarcador('❤️', 'Vida', hpHumano + '/' + Math.round(playerMaxHealth), '#ff6644') +
+        filaMarcador('💰', 'Oro', Math.round(playerGold), '#ffcc44') +
+        filaMarcador('💀', 'Muertes', playerDeathCount, '#ff4466') +
+        filaMarcador('🏰', 'Torres en pie', st.torresAliadas + '/' + st.torresAliadasTotal, '#44ff88');
+
+    const ladoEnemigo =
+        filaMarcador('🗡️', 'Daño de ataque', Math.round(ENEMY_AXIE_ATTACK_DAMAGE * enemyAxieBonuses.damageMultiplier), '#ff8844') +
+        filaMarcador('🛡️', 'Defensa física', '-', '#888') +
+        filaMarcador('📿', 'Defensa mágica', '-', '#888') +
+        filaMarcador('⚡', 'Vel. ataque', (ENEMY_AXIE_ATTACK_SPEED).toFixed(2) + 's', '#ffaa44') +
+        filaMarcador('🏹', 'Rango', ENEMY_AXIE_ATTACK_RANGE.toFixed(1), '#aa88ff') +
+        filaMarcador('❤️', 'Vida', hpAxie + '/' + Math.round(enemyAxieMaxHealth), '#ff6644') +
+        filaMarcador('💰', 'Oro', Math.round(enemyAxieGold), '#ffcc44') +
+        filaMarcador('🏆', 'Objetos', Object.keys(enemyAxieItems || {}).length, '#ffcc44') +
+        filaMarcador('🏰', 'Torres en pie', st.torresEnemigas + '/' + st.torresEnemigasTotal, '#ff4488');
+
+    const el = document.createElement('div');
+    el.id = 'marcador-tab';
+    el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+        'background:rgba(0,0,0,0.92);border:2px solid rgba(255,255,255,0.35);border-radius:14px;' +
+        'padding:22px 28px;z-index:300;color:#fff;font-family:\'Courier New\',monospace;' +
+        'min-width:560px;pointer-events:none;box-shadow:0 0 40px rgba(0,0,0,0.8);';
+
+    el.innerHTML =
+        '<div style="text-align:center;font-size:20px;font-weight:bold;margin-bottom:14px;color:#ffcc44;letter-spacing:2px;">MARCADOR</div>' +
+        '<div style="display:flex;gap:34px;justify-content:space-between;">' +
+            '<div style="flex:1;"><div style="text-align:center;font-size:16px;font-weight:bold;color:#44ff88;margin-bottom:8px;">' + currentAxieName + '</div>' + ladoJugador + '</div>' +
+            '<div style="width:2px;background:rgba(255,255,255,0.2);"></div>' +
+            '<div style="flex:1;"><div style="text-align:center;font-size:16px;font-weight:bold;color:#ff4488;margin-bottom:8px;">AXIE ENEMIGO</div>' + ladoEnemigo + '</div>' +
+        '</div>' +
+        '<div style="text-align:center;font-size:11px;color:#888;margin-top:14px;">Suelta Tab para cerrar</div>';
+
+    document.body.appendChild(el);
+    marcadorElemento = el;
+}
+
+function ocultarMarcador() {
+    if (marcadorElemento) {
+        marcadorElemento.remove();
+        marcadorElemento = null;
+    }
+}
+
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         if (gameFinished && !isAITrainingMode) return;
@@ -4124,8 +5149,36 @@ document.addEventListener('keydown', (e) => {
             if (gamePaused) hidePauseMenu();
             else showPauseMenu();
         }
+        return;
+    }
+
+    // --- Tab: marcador de partida (se mantiene mientras se pulsa) ---
+    if (e.key === 'Tab') {
+        e.preventDefault();   // sin esto el navegador cambia el foco
+        if (!gameStarted || gameFinished || isAITrainingMode) return;
+        mostrarMarcador();
+        return;
+    }
+
+    // --- B: teletransporte al nexo aliado (recall) ---
+    if (e.key === 'b' || e.key === 'B') {
+        if (!gameStarted || gameFinished || gamePaused) return;
+        if (isAITrainingMode) return;
+        if (!playerSpawned || isPlayerDead) return;
+        if (shopOpen) return;
+        teletransporteAlNexo();
+        return;
     }
 });
+
+// Tab se suelta: se esconde el marcador.
+document.addEventListener('keyup', (e) => {
+    if (e.key === 'Tab') ocultarMarcador();
+});
+
+// Al perder el foco con Tab pulsado, el navegador no manda el keyup.
+// Sin esto el marcador se quedaria pegado en pantalla.
+window.addEventListener('blur', () => ocultarMarcador());
 
 let frameCounter = 0;
 let lastTime = 0;
@@ -4361,7 +5414,11 @@ function gameLoop(time, token) {
     for (const tower of towers) tower.update(delta, enemies);
     for (const m of aliados) m.update(delta, aliados, enemigos, towers, playerModel);
     for (const m of enemigos) m.update(delta, aliados, enemigos, towers, playerModel);
+    // Colision con estructuras: tienda, nexo y torres tienen cuerpo real.
+    applyStructureCollisions(aliados.concat(enemigos));
     resolveMinionCollisions(delta);
+    // Los Axies tambien respetan las estructuras (mismo empuje, otro cuerpo).
+    applyStructureCollisions([playerModel, enemyAxieModel].filter(Boolean));
     suavizarYEntidades(delta);
     if (gameStarted && !gameFinished) updateEnemyAxie(delta);
     if (nexusEnemigo) nexusEnemigo.updateExplosion(delta);
