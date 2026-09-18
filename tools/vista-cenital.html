@@ -45,6 +45,7 @@
   #fails { color:#ffbf4d; margin-top:6px; font-size:11px; line-height:1.5; }
 
   #out { bottom:12px; right:12px; max-width:430px; max-height:44vh; overflow:auto; display:none; }
+  #diag { top:190px; right:12px; width:330px; max-height:34vh; overflow:auto; }
   #out h2 { font-size:12px; color:#5fd68a; margin-bottom:7px; }
   #out pre {
     background:#0a0a14; border:1px solid #2c2c48; border-radius:6px; padding:9px;
@@ -76,6 +77,11 @@
 <div class="panel" id="sel">
   <h2 id="sel-tit">SIN SELECCIÓN</h2>
   <div id="sel-body"><div class="vacio">Haz clic en un objeto del mapa para moverlo.</div></div>
+</div>
+
+<div class="panel" id="diag">
+  <h2 style="color:#ff9d9d;">🔎 DIAGNÓSTICO</h2>
+  <div id="traza" style="white-space:pre; font-size:10.5px; line-height:1.5; max-height:24vh; overflow:auto; color:#c8c8e8;">—</div>
 </div>
 
 <div class="panel" id="out">
@@ -117,6 +123,16 @@ let fallos = [];
 const ORIGINAL = {};
 
 function fail(m) { if (!fallos.includes(m)) fallos.push(m); renderFails(); }
+
+// Buzon de diagnostico visible en pantalla: el usuario no tiene por que
+// abrir la consola para decirme donde se rompe el arrastre.
+const trazas = [];
+function traza(m) {
+  trazas.push(m);
+  if (trazas.length > 14) trazas.shift();
+  const el = document.getElementById('traza');
+  if (el) el.textContent = trazas.join('\n');
+}
 function renderFails() {
   const f = document.getElementById('fails');
   if (f) f.innerHTML = fallos.map(x => '• ' + x).join('<br>');
@@ -311,11 +327,18 @@ function refrescarPanelSel() {
 }
 
 function mover(label, x, z) {
-  if (!isFinite(x) || !isFinite(z)) return;
+  traza('mover(' + label + ', ' + x + ', ' + z + ')');
+  if (!isFinite(x) || !isFinite(z)) { traza('  descartado: no finito'); return; }
+  if (!D) { traza('  descartado: sin __debug'); return; }
+  if (typeof D.setPos !== 'function') { traza('  ERROR: __debug.setPos no existe'); return; }
   try {
     const r = D.setPos(label, x, z);
+    traza('  setPos -> ' + JSON.stringify(r));
     if (r && r.ok === false) { fail(r.error); return; }
-  } catch (e) { fail('setPos: ' + e.message); return; }
+  } catch (e) {
+    traza('  EXCEPCION: ' + e.message);
+    fail('setPos: ' + e.message); return;
+  }
   const o = ORIGINAL[label];
   if (Math.abs(o.x - x) < 0.001 && Math.abs(o.z - z) < 0.001) delete cambios[label];
   else cambios[label] = { x: +x.toFixed(2), z: +z.toFixed(2) };
@@ -359,6 +382,9 @@ canvas.addEventListener('mousedown', (e) => {
   const a = lastActors[i];
   const p = T.inv(mx, my);
   offset.x = a.x - p.x; offset.z = a.z - p.z;
+  traza('clic en ' + a.label + ' | raton ' + mx.toFixed(0) + ',' + my.toFixed(0) +
+        ' | mundo ' + p.x.toFixed(2) + ',' + p.z.toFixed(2) +
+        ' | agarre ' + offset.x.toFixed(2) + ',' + offset.z.toFixed(2));
   canvas.style.cursor = 'grabbing';
   document.getElementById('sel-body').dataset.label = '';
 });
@@ -374,6 +400,8 @@ window.addEventListener('mousemove', (e) => {
   if (arrastrando && seleccion !== null) {
     const a = lastActors[seleccion];
     if (!a) return;
+    window.__mm = (window.__mm || 0) + 1;
+    if (window.__mm % 25 === 0) traza('arrastrando... ' + window.__mm + ' movimientos');
     const p = T.inv(mx, my);
     let nx = p.x + offset.x, nz = p.z + offset.z;
     if (e.shiftKey) { // shift = solo un eje
