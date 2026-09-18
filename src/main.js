@@ -932,10 +932,10 @@ function procesarLanes() {
     // mide 1.30 de ancho, asi que en +-2.5 ocupa +-1.85 a +-3.15: bien
     // dentro del asfalto. En +-3.5 (+-2.85 a +-4.15) caia sobre el arcen,
     // la franja oscura del borde, y se veia fuera del carril.
-    if (!nexusAliado) nexusAliado = new Nexus(-2.0, -21, false);
-    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.0, 21, true);
-    if (!shopAliada) shopAliada = new Shop(2.5, -24, false);
-    if (!shopEnemiga) shopEnemiga = new Shop(-2.5, 24, true);
+    if (!nexusAliado) nexusAliado = new Nexus(-2.0, -23, false);
+    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.0, 23, true);
+    if (!shopAliada) shopAliada = new Shop(4.0, -24, false);
+    if (!shopEnemiga) shopEnemiga = new Shop(-4.0, 24, true);
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
@@ -3059,8 +3059,18 @@ function spawnWave() {
     waveDiv.textContent = `⚔️ OLEADA ${waveNumber}`;
 
     // 🎯 NUEVO: spawn junto al nexo con formación tipo LoL
-    const NEXUS_Z_ALLY = -21;
-    const NEXUS_Z_ENEMY = 21;
+    //
+    // Los minions nacen DELANTE de su nexo (hacia el centro del carril),
+    // no detras. El signo estaba invertido: los aliados salian en
+    // -21 - filas*1.3, o sea hacia -24, que es donde esta la tienda azul,
+    // y aparecian encima de ella en vez de salir al carril. Los enemigos
+    // tenian el mismo error espejado. Ahora nacen hacia el centro y
+    // caminan en su 'direction' (aliado +1, enemigo -1) hacia el frente.
+    // Deben coincidir con la z del nexo en createScene (arriba). Si se
+    // mueve el nexo, hay que mover esto: antes estaban en +-21 mientras
+    // el nexo ya habia ido a +-23, y los minions salian descolgados.
+    const NEXUS_Z_ALLY = -23;
+    const NEXUS_Z_ENEMY = 23;
     const LANE_X = 0;
     const MELEE_ROWS = 2;
     const MELEE_PER_ROW = 3;
@@ -3078,7 +3088,7 @@ function spawnWave() {
 
     // ALIADOS melee
     for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY - row * ROW_SPACING_Z;
+        const z = NEXUS_Z_ALLY + row * ROW_SPACING_Z;
         for (let col = 0; col < MELEE_PER_ROW; col++) {
             if (row * MELEE_PER_ROW + col >= comp.melee) break;
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
@@ -3096,7 +3106,7 @@ function spawnWave() {
 
     // ALIADOS mage
     for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
+        const z = NEXUS_Z_ALLY + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
         for (let col = 0; col < MAGE_PER_ROW; col++) {
             if (row * MAGE_PER_ROW + col >= comp.mage) break;
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
@@ -3114,7 +3124,7 @@ function spawnWave() {
 
     // ENEMIGOS melee
     for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY + row * ROW_SPACING_Z;
+        const z = NEXUS_Z_ENEMY - row * ROW_SPACING_Z;
         for (let col = 0; col < MELEE_PER_ROW; col++) {
             if (row * MELEE_PER_ROW + col >= comp.melee) break;
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
@@ -3132,7 +3142,7 @@ function spawnWave() {
 
     // ENEMIGOS mage
     for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
+        const z = NEXUS_Z_ENEMY - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
         for (let col = 0; col < MAGE_PER_ROW; col++) {
             if (row * MAGE_PER_ROW + col >= comp.mage) break;
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
@@ -3156,7 +3166,7 @@ function spawnWave() {
             team: 'ally', tipo: 'big',
             index: queueIndexAlly,
             delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
-            x: LANE_X, z: NEXUS_Z_ALLY - 0.6,
+            x: LANE_X, z: NEXUS_Z_ALLY + 0.6,
             formationRow: 0, formationCol: 0
         });
         queueIndexAlly++;
@@ -3167,7 +3177,7 @@ function spawnWave() {
             team: 'enemy', tipo: 'big',
             index: queueIndexEnemy,
             delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
-            x: LANE_X, z: NEXUS_Z_ENEMY + 0.6,
+            x: LANE_X, z: NEXUS_Z_ENEMY - 0.6,
             formationRow: 0, formationCol: 0
         });
         queueIndexEnemy++;
