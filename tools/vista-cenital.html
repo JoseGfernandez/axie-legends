@@ -45,7 +45,6 @@
   #fails { color:#ffbf4d; margin-top:6px; font-size:11px; line-height:1.5; }
 
   #out { bottom:12px; right:12px; max-width:430px; max-height:44vh; overflow:auto; display:none; }
-  #diag { top:190px; right:12px; width:330px; max-height:34vh; overflow:auto; }
   #out h2 { font-size:12px; color:#5fd68a; margin-bottom:7px; }
   #out pre {
     background:#0a0a14; border:1px solid #2c2c48; border-radius:6px; padding:9px;
@@ -84,11 +83,6 @@
   <div id="sel-body"><div class="vacio">Haz clic en un objeto del mapa para moverlo.</div></div>
 </div>
 
-<div class="panel" id="diag">
-  <h2 style="color:#ff9d9d;">🔎 DIAGNÓSTICO</h2>
-  <div id="traza" style="white-space:pre; font-size:10.5px; line-height:1.5; max-height:24vh; overflow:auto; color:#c8c8e8;">—</div>
-</div>
-
 <div class="panel" id="out">
   <h2>✔ POSICIONES LISTAS</h2>
   <pre id="out-json"></pre>
@@ -124,9 +118,9 @@ let hover = null;
 let cambios = {};                // label -> {x, z}
 let fallos = [];
 let zoom = 1;                    // factor de zoom sobre el encuadre automatico
-let pan  = { x: 0, z: 0 };       // desplazamiento del encuadre
+let pan  = { x: 0, y: 0 };       // desplazamiento del encuadre, en pixeles
 let panning = false;             // arrastrando el lienzo (boton medio o espacio)
-let panIni = { x: 0, z: 0, mx: 0, my: 0 };
+let panIni = { x: 0, y: 0, mx: 0, my: 0 };
 let espacio = false;             // barra espaciadora mantenida
 
 // posicion de reposo conocida, para poder restaurar y para el diff
@@ -136,12 +130,13 @@ function fail(m) { if (!fallos.includes(m)) fallos.push(m); renderFails(); }
 
 // Buzon de diagnostico visible en pantalla: el usuario no tiene por que
 // abrir la consola para decirme donde se rompe el arrastre.
-const trazas = [];
+// Las trazas quedan solo en consola: el panel en pantalla ya no hace falta
+// y estorbaba. Si el arrastre vuelve a fallar, F12 -> __trazas.
+const trazas = window.__trazas = [];
 function traza(m) {
   trazas.push(m);
-  if (trazas.length > 14) trazas.shift();
-  const el = document.getElementById('traza');
-  if (el) el.textContent = trazas.join('\n');
+  if (trazas.length > 60) trazas.shift();
+  if (typeof console !== 'undefined') console.log('[cenital]', m);
 }
 function renderFails() {
   const f = document.getElementById('fails');
@@ -186,16 +181,24 @@ function esperarEscenario() {
 }
 
 // --- geometria ------------------------------------------------------------
-function transformador() {
+// Escala base del encuadre completo (zoom 1). Solo depende del tamano de
+// la ventana, no del pan: asi el pan y el zoom no se pisan al recalcularse.
+function escalaBase() {
   const w = D.widths;
   const pad = 90;
-  const base = Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
-                        (innerHeight - pad * 2) / (w.laneLargo + 10));
-  const s = base * zoom;
-  // el pan se expresa en unidades de mundo y se centra en el carril
-  const cx = innerWidth / 2 + pan.x * s, cy = innerHeight / 2 + pan.z * s;
+  return Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
+                  (innerHeight - pad * 2) / (w.laneLargo + 10));
+}
+
+function transformador() {
+  const s = escalaBase() * zoom;
+  // El pan va en PIXELES de pantalla. Guardarlo en unidades de mundo hacia
+  // que el zoom y el redibujado se desincronizaran y el encuadre saltara al
+  // centro en cada giro de rueda.
+  const cx = innerWidth / 2 + pan.x, cy = innerHeight / 2 + pan.y;
   return {
     s,
+    cx, cy,
     px: (x) => cx + x * s,
     py: (z) => cy + z * s,
     inv: (px, py) => ({ x: (px - cx) / s, z: (py - cy) / s }),
@@ -207,21 +210,21 @@ function transformador() {
 // ajusta el pan para que esa misma coordenada caiga bajo el cursor despues.
 function zoomEn(mx, my, factor) {
   if (!D) return;
-  const nuevoZoom = Math.max(0.4, Math.min(12, zoom * factor));
+  const nuevoZoom = Math.max(0.3, Math.min(14, zoom * factor));
   if (nuevoZoom === zoom) return;
+  // Punto de mundo bajo el cursor con el encuadre ACTUAL.
   const p = T.inv(mx, my);
   zoom = nuevoZoom;
-  const w = D.widths, pad = 90;
-  const base = Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
-                        (innerHeight - pad * 2) / (w.laneLargo + 10));
-  const s = base * zoom;
-  // queremos: cx + p.x*s = mx  ->  pan.x = (mx - innerWidth/2)/s - p.x
-  pan.x = (mx - innerWidth / 2) / s - p.x;
-  pan.z = (my - innerHeight / 2) / s - p.z;
+  const s = escalaBase() * zoom;
+  // Queremos que ese mismo punto caiga otra vez bajo el cursor:
+  //   mx = cx + p.x*s  con  cx = innerWidth/2 + pan.x
+  //   -> pan.x = mx - p.x*s - innerWidth/2
+  pan.x = mx - p.x * s - innerWidth / 2;
+  pan.y = my - p.z * s - innerHeight / 2;
   T = transformador();
 }
 
-function encuadrarTodo() { zoom = 1; pan = { x: 0, z: 0 }; }
+function encuadrarTodo() { zoom = 1; pan = { x: 0, y: 0 }; }
 
 function rectMundo(x0, x1, z0, z1, relleno, borde, grosor) {
   const X0 = T.px(x0), X1 = T.px(x1), Y0 = T.py(z0), Y1 = T.py(z1);
@@ -416,7 +419,7 @@ canvas.addEventListener('mousedown', (e) => {
   // habitual en mapas y editores 2D, y no choca con mover objetos.
   if (e.button === 1 || espacio) {
     panning = true;
-    panIni = { x: pan.x, z: pan.z, mx, my };
+    panIni = { x: pan.x, y: pan.y, mx, my };
     canvas.style.cursor = 'move';
     return;
   }
@@ -447,10 +450,10 @@ window.addEventListener('mousemove', (e) => {
 
   if (panning) {
     e.preventDefault();
-    // El pan esta en unidades de mundo: convertir el desplazamiento en
-    // pixeles a mundo con la escala vigente.
-    pan.x = panIni.x + (mx - panIni.mx) / T.s;
-    pan.z = panIni.z + (my - panIni.my) / T.s;
+    // El pan esta en pixeles: el desplazamiento del raton se suma directo,
+    // sin depender de la escala, y asi el lienzo sigue al cursor 1:1.
+    pan.x = panIni.x + (mx - panIni.mx);
+    pan.y = panIni.y + (my - panIni.my);
     return;
   }
 
