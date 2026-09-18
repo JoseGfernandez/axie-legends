@@ -5,6 +5,7 @@
 <title>Axie Legends · Editor de posiciones del carril</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { user-select:none; -webkit-user-select:none; }
   body { background:#0d0d18; color:#d8d8e8; font-family:'Segoe UI',Tahoma,sans-serif; overflow:hidden; }
   canvas#top { display:block; width:100vw; height:100vh; cursor:crosshair; }
   iframe#juego { position:fixed; width:1280px; height:800px; left:-4000px; top:0; border:0; }
@@ -342,6 +343,10 @@ function hitTest(mx, my) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
+  // Sin esto el navegador arranca una seleccion de texto en cuanto el
+  // raton se mueve: el canvas deja de recibir mousemove y el arrastre
+  // se queda clavado aunque la seleccion del objeto si ocurra.
+  e.preventDefault();
   if (!T) return;
   const r = canvas.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
@@ -358,7 +363,10 @@ canvas.addEventListener('mousedown', (e) => {
   document.getElementById('sel-body').dataset.label = '';
 });
 
-canvas.addEventListener('mousemove', (e) => {
+// El mousemove va en window, no en el canvas: al arrastrar rapido el
+// puntero puede salir del canvas y el canvas dejaria de recibir el evento.
+window.addEventListener('mousemove', (e) => {
+  e.preventDefault();
   if (!T) return;
   const r = canvas.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
