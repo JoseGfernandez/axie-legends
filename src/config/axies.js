@@ -140,27 +140,33 @@ export const AXIES_DATA = {
 // De los 7 GLB, tripp es el unico SIN Axe.Idle/Axe.Walk (solo trae
 // Axe.Attack), asi que conserva los clips genericos y su prefijo va a null.
 export const PERFIL_COMBATE = {
-    // cancelarHueso: Bing trae el hueso Weapon_R_JNT MAL animado en los clips de
-    // combate (medido en el GLB): Cannon.Idle [-0.497, 0.501, ...], Cannon.Walk
-    // [-0.732, 0.015, ...], Cannon.Attack [-0.723, -0.105, ...]. No hay un angulo
-    // fijo que sirva para los tres, asi que su arma se orienta respecto al modelo
-    // en vez de heredar el hueso. Los otros seis lo traen en identidad en todos
-    // los clips (desviacion 0.000) y funcionan copiando la rotacion del hueso.
-    bing:     { clipArma: 'Cannon', tipo: 'rango', ataque: 'Cannon.Attack', factor: 0.60, giroArma: 0, cancelarHueso: true },
-    kotaro:   { clipArma: 'Sword',  tipo: 'melee', ataque: 'Sword.Attack',  factor: 0.72, giroArma: 0 },
-    kibo:     { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0 },
-    paladill: { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0 },
-    pomodoro: { clipArma: 'Staff',  tipo: 'rango', ataque: 'Staff.Attack',  factor: 0.60, giroArma: 0 },
-    xia:      { clipArma: 'Axe',    tipo: 'melee', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0 },
-    tripp:    { clipArma: null,     tipo: 'rango', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0 },
+    bing:     { clipArma: 'Cannon', tipo: 'rango', ataque: 'Cannon.Attack', factor: 0.60, giroArma: 0, cancelarHueso: true, separacion: [0, 0, 0] },
+    kotaro:   { clipArma: 'Sword',  tipo: 'melee', ataque: 'Sword.Attack',  factor: 0.72, giroArma: 0, separacion: [0, 0, 0] },
+    kibo:     { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0, separacion: [0, 0, 0] },
+    paladill: { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0, separacion: [0, 0, 0] },
+    pomodoro: { clipArma: 'Staff',  tipo: 'rango', ataque: 'Staff.Attack',  factor: 0.60, giroArma: 0, separacion: [0, 0, 0] },
+    xia:      { clipArma: 'Axe',    tipo: 'melee', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0, separacion: [0, 0, 0] },
+    tripp:    { clipArma: null,     tipo: 'rango', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0, separacion: [0, 0, 0] },
 };
 
+// 'separacion': desplazamiento [x, y, z] del arma respecto al hueso, en
+// unidades locales de ese hueso. Sirve para despegarla del cuerpo cuando
+// queda metida en el torso o en el sombrero. Empieza en [0, 0, 0] (sin
+// cambio) y se calibra Axie a Axie mirando el resultado en pantalla.
+//
+// Valores neutros de respaldo. NO se parte del perfil de Bing a proposito:
+// antes se hacia Object.assign({}, PERFIL_COMBATE.bing, p) y cualquier campo
+// propio de Bing (cancelarHueso) se filtraba a TODOS los Axies que no lo
+// definieran, porque el merge no distingue entre valores por defecto y
+// ajustes de un Axie concreto.
+const PERFIL_NEUTRO = { clipArma: null, tipo: 'melee', ataque: null, factor: 0.60, giroArma: 0, cancelarHueso: false, separacion: [0, 0, 0] };
+
 // Devuelve el perfil de combate de un Axie. Si el id no existe devuelve los
-// valores de Bing, para que ningun llamador tenga que defenderse de undefined.
+// valores neutros, para que ningun llamador tenga que defenderse de undefined.
 export function getPerfilCombate(id) {
     const p = PERFIL_COMBATE[id];
-    if (!p) return Object.assign({}, PERFIL_COMBATE.bing);
-    return Object.assign({}, PERFIL_COMBATE.bing, p);
+    if (!p) return Object.assign({}, PERFIL_NEUTRO);
+    return Object.assign({}, PERFIL_NEUTRO, p);
 }
 
 export function getAxieById(id) {

@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MenuScreen } from './ui/MenuScreen.js';
 import { getAxieById, getAllAxies, getPerfilCombate } from './config/axies.js';
+import { getHabilidades, getHabilidad } from './config/habilidades.js';
 
 // 🔧 CORRECCIÓN 1: GLTFLoader compartido
 const sharedGLTFLoader = new GLTFLoader();
@@ -214,7 +215,12 @@ function attachAxieWeapon(axieModel, axieData) {
         arma.scale.setScalar(((altura * perfil.factor) / wMax) / factorPadre);
 
         hueso.add(arma);
-        arma.position.set(0, 0, 0);
+        // Desplazamiento por arma desde el catalogo: despega el arma del
+        // cuerpo cuando el hueso la deja pegada o metida en el sombrero.
+        // Se expresa en las unidades LOCALES del hueso (el arma ya lleva su
+        // escala aplicada antes de anadirse como hija).
+        const sep = perfil.separacion || [0, 0, 0];
+        arma.position.set(sep[0] || 0, sep[1] || 0, sep[2] || 0);
 
         // El hueso hereda la rotacion del brazo, que va extendido, y eso deja el
         // eje Y local apuntando al suelo (medido: (+0.77, -0.64, -0.01)). El arma
@@ -222,12 +228,21 @@ function attachAxieWeapon(axieModel, axieData) {
         // devolverla a su orientacion natural (Z al frente en estos GLB).
         const rotHueso = new THREE.Quaternion();
         hueso.getWorldQuaternion(rotHueso);
-        // Orientacion RELATIVA: copiar (no invertir) la rotacion del hueso hace
-        // que el arma siga el giro natural del brazo y apunte adonde mira el
-        // personaje. Invertirla la dejaba clavada en una orientacion fija del
-        // mundo: le funcionaba a Kotaro de casualidad, pero a Bing le ponia el
-        // canon mirando a la espalda. El desvio se corrige por Axie (grados).
-        arma.quaternion.copy(rotHueso);
+        if (perfil.cancelarHueso) {
+            // Caso Bing: su clip de combate trae el hueso del arma MAL animado
+            // (medido en el GLB: Cannon.Idle [-0.497, 0.501, ...], Cannon.Walk
+            // [-0.732, 0.015, ...]). No hay un angulo fijo que sirva para los
+            // tres clips, asi que el arma NO hereda el hueso: se queda con la
+            // orientacion natural que trae el GLB, que es la unica estable.
+            arma.quaternion.identity();
+        } else {
+            // Resto de Axies: copiar (no invertir) la rotacion del hueso hace
+            // que el arma siga el giro natural del brazo y apunte adonde mira
+            // el personaje. Invertirla la dejaba clavada en una orientacion
+            // fija del mundo: le funcionaba a Kotaro de casualidad, pero a
+            // Bing le ponia el canon mirando a la espalda.
+            arma.quaternion.copy(rotHueso);
+        }
         if (perfil.giroArma) {
             arma.rotateY(THREE.MathUtils.degToRad(perfil.giroArma));
         }
@@ -348,7 +363,7 @@ let victoryScreen = null;
 let defeatScreen = null;
 let gamePaused = false;
 let pauseMenu = null;
-let selectedAxieId = 'bestia';
+let selectedAxieId = 'bing';
 let axieLoaded = false;
 let currentAxieName = 'Bing';
 let potionHPCount = 0;
@@ -1419,13 +1434,20 @@ function dispararAtaqueJugador(target, origen, dmg) {
 }
 
 // Traduce el arma del Axie (segun el catalogo) al aspecto del proyectil.
+// OJO: no basta con mirar clipArma. Tripp lo tiene en null porque su GLB no
+// trae clips Axe.Idle/Axe.Walk, pero SI empuna un hacha (ataca con
+// Axe.Attack). Con clipArma=null caia en 'default' y lanzaba un proyectil
+// 'orb' sin material asignado: el rayo violeta no se veia. Se deduce el
+// arma del prefijo de 'ataque' como respaldo.
 function proyectilDelPerfil() {
     const perfil = getPerfilCombate(selectedAxieId);
-    switch (perfil.clipArma) {
+    const arma = perfil.clipArma
+        || (perfil.ataque ? String(perfil.ataque).split('.')[0] : null);
+    switch (arma) {
         case 'Cannon': return 'bala';
         case 'Staff':  return 'orbe';
         case 'Axe':    return 'rayo';
-        default:       return 'orb';
+        default:       return 'bala';
     }
 }
 
@@ -2982,7 +3004,12 @@ function spawnWave() {
     const ROW_SPACING_Z = 1.3;
     const COL_SPACING_X = 1.1;
 
-    let queueIndex = 0;
+    // El indice de formacion es POR BANDO, no global. Con un contador unico,
+    // los aliados se quedaban con los indices bajos y los enemigos arrancaban
+    // en el indice N: con delay = index * SPAWN_STAGGER_DELAY salian N segundos
+    // tarde (desfase de ~8s medido), en vez de formarse en paralelo.
+    let queueIndexAlly = 0;
+    let queueIndexEnemy = 0;
 
     // ALIADOS melee
     for (let row = 0; row < MELEE_ROWS; row++) {
@@ -2992,13 +3019,13 @@ function spawnWave() {
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
             spawnQueue.push({
                 team: 'ally', tipo: 'melee',
-                index: queueIndex,
-                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                index: queueIndexAlly,
+                delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
                 x, z,
                 formationRow: row,
                 formationCol: col
             });
-            queueIndex++;
+            queueIndexAlly++;
         }
     }
 
@@ -3010,13 +3037,13 @@ function spawnWave() {
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
             spawnQueue.push({
                 team: 'ally', tipo: 'mage',
-                index: queueIndex,
-                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                index: queueIndexAlly,
+                delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
                 x, z,
                 formationRow: row + MELEE_ROWS,
                 formationCol: col
             });
-            queueIndex++;
+            queueIndexAlly++;
         }
     }
 
@@ -3028,13 +3055,13 @@ function spawnWave() {
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
             spawnQueue.push({
                 team: 'enemy', tipo: 'melee',
-                index: queueIndex,
-                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                index: queueIndexEnemy,
+                delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
                 x, z,
                 formationRow: row,
                 formationCol: col
             });
-            queueIndex++;
+            queueIndexEnemy++;
         }
     }
 
@@ -3046,13 +3073,13 @@ function spawnWave() {
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
             spawnQueue.push({
                 team: 'enemy', tipo: 'mage',
-                index: queueIndex,
-                delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+                index: queueIndexEnemy,
+                delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
                 x, z,
                 formationRow: row + MELEE_ROWS,
                 formationCol: col
             });
-            queueIndex++;
+            queueIndexEnemy++;
         }
     }
 
@@ -3062,23 +3089,23 @@ function spawnWave() {
     if (shouldSpawnBigMinion('ally')) {
         spawnQueue.push({
             team: 'ally', tipo: 'big',
-            index: queueIndex,
-            delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+            index: queueIndexAlly,
+            delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
             x: LANE_X, z: NEXUS_Z_ALLY - 0.6,
             formationRow: 0, formationCol: 0
         });
-        queueIndex++;
+        queueIndexAlly++;
         bigAlly = true;
     }
     if (shouldSpawnBigMinion('enemy')) {
         spawnQueue.push({
             team: 'enemy', tipo: 'big',
-            index: queueIndex,
-            delay: queueIndex * CONFIG.SPAWN_STAGGER_DELAY,
+            index: queueIndexEnemy,
+            delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
             x: LANE_X, z: NEXUS_Z_ENEMY + 0.6,
             formationRow: 0, formationCol: 0
         });
-        queueIndex++;
+        queueIndexEnemy++;
         bigEnemy = true;
     }
 
@@ -3283,6 +3310,7 @@ let playerHUD = null;
 let hudWrapper = null;
 let potionHUD = null;
 let itemHUD = null;
+let abilityHUD = null;      // panel de teclas Q/W/E/R
 let itemSlots = [];
 
 function createPlayerHUD() {
@@ -3318,6 +3346,7 @@ function createPlayerHUD() {
     requestAnimationFrame(() => {
         const h = playerHUD.offsetHeight;
         createPotionHUD(h);
+        createAbilityHUD(h);
         createItemHUD(h);
     });
 }
@@ -3358,6 +3387,64 @@ function createPotionHUD(h) {
     potionHUD.appendChild(mpBox);
     
     hudWrapper.appendChild(potionHUD);
+}
+
+// Panel de habilidades: se genera entero desde src/config/habilidades.js.
+// Para cambiar teclas, iconos o recargas NO hay que tocar este archivo.
+// Si una habilidad tiene 'icono', se pinta la imagen; si no, se pinta la tecla.
+function createAbilityHUD(h) {
+    if (abilityHUD) abilityHUD.remove();
+    habilidadCajas = {};
+    abilityHUD = document.createElement('div');
+    abilityHUD.style.cssText = `width:66px;height:${h}px;background:rgba(0,0,0,0.9);border:2px solid rgba(255,255,255,0.3);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box;`;
+    for (const hab of getHabilidades()) {
+        const box = document.createElement('div');
+        box.style.cssText = `flex:1;background:rgba(255,255,255,0.06);border:2px solid ${hab.color}66;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;user-select:none;overflow:hidden;`;
+        if (hab.icono) {
+            // Con icono: la imagen ocupa el hueco y la tecla va como esquina.
+            const img = document.createElement('img');
+            img.src = getAssetUrl(hab.icono);
+            img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+            img.onerror = () => { img.remove(); pintarTecla(box, hab); };
+            box.appendChild(img);
+        } else {
+            pintarTecla(box, hab);
+        }
+        const cd = document.createElement('div');
+        cd.id = 'ability-cd-' + hab.id;
+        cd.style.cssText = 'position:absolute;font-size:9px;color:#ffcc44;font-weight:bold;text-shadow:0 0 3px #000;';
+        box.style.position = 'relative';
+        box.appendChild(cd);
+        habilidadCajas[hab.id] = box;
+        abilityHUD.appendChild(box);
+    }
+}
+
+// Dibuja la tecla y el nombre dentro de un hueco sin icono.
+function pintarTecla(box, hab) {
+    box.innerHTML = `<div style="font-size:13px;font-weight:bold;color:${hab.color};">${hab.tecla}</div>`
+        + `<div style="font-size:8px;color:#ccc;">${hab.nombre}</div>`;
+}
+
+// Refresca recargas y estado de maná de TODAS las habilidades del panel.
+function updateAbilityHUD() {
+    for (const hab of getHabilidades()) {
+        const box = habilidadCajas[hab.id];
+        if (!box) continue;
+        const cd = document.getElementById('ability-cd-' + hab.id);
+        const restante = cooldownsHabilidad[hab.id] || 0;
+        const sinMana = hab.mana > 0 && playerMana < hab.mana;
+        if (restante > 0) {
+            if (cd) cd.textContent = restante.toFixed(1) + 's';
+            box.style.opacity = '0.55';
+        } else if (sinMana) {
+            if (cd) cd.textContent = 'MP';
+            box.style.opacity = '0.55';
+        } else {
+            if (cd) cd.textContent = '';
+            box.style.opacity = '1';
+        }
+    }
 }
 
 function createItemHUD(h) {
@@ -3541,6 +3628,13 @@ let enemyAxieAnimWalk = null;
 let enemyAxieAnimAttack = null;   // clip de ataque con arma del Axie enemigo
 let enemyAxieAttackTimer = 0;     // temporizador del gesto de ataque
 let enemyAxieCurrentAnim = 'idle';
+// Histeresis de objetivo: el Axie enemigo guarda a quien persigue y lo
+// mantiene un tiempo minimo. Sin esto, cuando un minion aliado se cruza
+// con la torre que estaba atacando, el objetivo saltaba de torre a minion
+// y de vuelta cada frame, y el Axie se quedaba oscilando en el borde.
+let enemyAxieLockedTarget = null;   // { type, ref } del objetivo retenido
+let enemyAxieLockTimer = 0;         // segundos que quedan de retencion
+const ENEMY_AXIE_TARGET_LOCK = 0.8; // duracion de la retencion
 let enemyAxieAttackCooldown = 0;
 let enemyAxieHealth = CONFIG.enemyMaxHealth;
 let enemyAxieMaxHealth = CONFIG.enemyMaxHealth;
@@ -4023,8 +4117,28 @@ function updateEnemyAxie(delta) {
         }
     }
 
-    const bestTarget = findBestEnemyTarget();
+    // Histeresis: si hay un objetivo retenido y sigue vivo, se mantiene hasta
+    // que expire su temporizador. Evita el vaiven torre <-> minion.
+    enemyAxieLockTimer -= delta;
+    let bestTarget = findBestEnemyTarget();
+    const lockVivo = enemyAxieLockedTarget && enemyAxieLockedTarget.ref
+        && !enemyAxieLockedTarget.ref.isDead
+        && !(enemyAxieLockedTarget.ref.health !== undefined && enemyAxieLockedTarget.ref.health <= 0);
+    if (lockVivo && enemyAxieLockTimer > 0 && bestTarget) {
+        // Mantener el objetivo retenido, conservando los datos frescos de posicion
+        const ref = enemyAxieLockedTarget.ref;
+        const posRef = ref.group ? ref.group.position : (ref.position || enemyAxieLockedTarget.pos);
+        if (posRef && enemyAxieLockedTarget.type === bestTarget.type
+            && Math.abs((posRef.x || 0) - bestTarget.position.x) < 0.01) {
+            bestTarget = Object.assign({}, bestTarget, { position: posRef, ref });
+        }
+    }
     if (bestTarget) {
+        // Renovar el candado cuando cambia de objetivo (o caduca).
+        if (!lockVivo || enemyAxieLockTimer <= 0) {
+            enemyAxieLockedTarget = { type: bestTarget.type, ref: bestTarget.ref, pos: bestTarget.position };
+            enemyAxieLockTimer = ENEMY_AXIE_TARGET_LOCK;
+        }
         const dynamicRange = ENEMY_AXIE_ATTACK_RANGE + enemyAxieBonuses.rangeBonus;
         const distToTarget = enemyAxieModel.position.distanceTo(bestTarget.position);
         
@@ -4129,6 +4243,9 @@ function updateEnemyAxie(delta) {
 function resetEnemyAxie() {
     if (enemyAxieModel) { scene.remove(enemyAxieModel); enemyAxieModel = null; }
     enemyAxie = null;
+    // Soltar el objetivo retenido: apuntaba al Axie/modelo que se acaba de borrar.
+    enemyAxieLockedTarget = null;
+    enemyAxieLockTimer = 0;
     enemyAxieMixer = null;
     enemyAxieAnimIdle = null;
     enemyAxieAnimWalk = null;
@@ -5274,6 +5391,155 @@ function teletransporteAlNexo() {
 }
 
 // ============================================================
+// SISTEMA DE HABILIDADES (Q / W / E / R)
+// ============================================================
+// El catalogo vive en src/config/habilidades.js. Aqui solo esta el MOTOR:
+// quien puede usarla, cuanto mana cuesta, cuanto recarga y como se ejecuta
+// cada tipo. Anadir una habilidad = tocar el catalogo, no este bloque.
+
+// Recarga restante por habilidad, en segundos.
+const cooldownsHabilidad = {};
+// Tabla tecla -> id de habilidad, construida desde el catalogo. Asi reasignar
+// una tecla es cambiar 'tecla' en el catalogo y nada mas.
+const HABILIDADES_POR_TECLA = {};
+for (const h of getHabilidades()) HABILIDADES_POR_TECLA[h.tecla.toLowerCase()] = h.id;
+// Ondas visuales activas: se expanden y se borran solas.
+const ondasActivas = [];
+// Huecos del HUD, por id de habilidad.
+let habilidadCajas = {};
+
+// Puerta comun: comprueba que se puede actuar y que hay mana. NO descuenta.
+// Devuelve false y explica por consola por que no se puede.
+function habilidadDisponible(hab) {
+    if (!hab) return false;
+    if (gamePaused || isAITrainingMode) return false;
+    if (!playerSpawned || isPlayerDead || !playerModel) return false;
+    if (shopOpen) return false;
+    if (hab.tipo !== 'pocion' && gameFinished) return false;
+    if ((cooldownsHabilidad[hab.id] || 0) > 0) {
+        console.log('⏳ ' + hab.nombre + ' en recarga: ' + cooldownsHabilidad[hab.id].toFixed(1) + 's');
+        return false;
+    }
+    if (hab.mana > 0 && playerMana < hab.mana) {
+        console.log('⛔ Mana insuficiente (' + Math.floor(playerMana) + '/' + hab.mana + ')');
+        return false;
+    }
+    return true;
+}
+
+// Punto de entrada unico de una tecla de habilidad.
+function usarHabilidad(id) {
+    const hab = getHabilidad(id);
+    if (!hab) return;
+    if (!habilidadDisponible(hab)) return;
+    aplicarHabilidad(hab);
+}
+
+// Efecto segun el tipo. Cada tipo nuevo que inventes se anade aqui.
+function aplicarHabilidad(hab) {
+    switch (hab.tipo) {
+        case 'pocion':
+            // Las pociones gestionan su propio cooldown y su propio aviso de
+            // "sin pociones" / "ya esta lleno", asi que solo se delegа.
+            usePotion(hab.pocion);
+            return;
+        case 'area':
+            aplicarHabilidadArea(hab);
+            return;
+        case 'utilidad':
+            if (hab.utilidad === 'reiniciar') reiniciarPosicionJugador();
+            return;
+        default:
+            console.log('⚠️ Habilidad sin efecto implementado: ' + hab.id + ' (' + hab.tipo + ')');
+            return;
+    }
+}
+
+// Habilidad de area: cuesta mana, recarga y golpea a todo lo enemigo cercano.
+function aplicarHabilidadArea(hab) {
+    playerMana -= hab.mana;
+    cooldownsHabilidad[hab.id] = hab.cooldown;
+    updatePlayerHUD();
+
+    const centro = playerModel.position;
+    let impactos = 0;
+    for (const m of enemigos) {
+        if (m.isDead || !m.group) continue;
+        if (centro.distanceTo(m.group.position) <= hab.radio) {
+            aplicarDanoMeleeJugador({ ref: m, isDead: m.isDead, type: 'minion' }, hab.dano);
+            impactos++;
+        }
+    }
+    if (enemyAxieModel && !enemyAxieIsDead
+        && centro.distanceTo(enemyAxieModel.position) <= hab.radio) {
+        aplicarDanoMeleeJugador({ ref: null, isDead: false, type: 'enemy_axie' }, hab.dano);
+        impactos++;
+    }
+    for (const tw of towers) {
+        if (tw.isDead || !tw.isEnemy) continue;
+        if (centro.distanceTo(tw.position) <= hab.radio) {
+            aplicarDanoMeleeJugador({ ref: tw, isDead: tw.isDead, type: 'tower' }, hab.dano);
+            impactos++;
+        }
+    }
+
+    // Onda visual: anillo que se expande y se desvanece.
+    const anillo = new THREE.Mesh(
+        new THREE.RingGeometry(hab.radio * 0.35, hab.radio, 32),
+        new THREE.MeshBasicMaterial({ color: hab.color, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+    );
+    anillo.rotation.x = -Math.PI / 2;
+    anillo.position.copy(centro);
+    anillo.position.y = GROUND_Y + 0.06;
+    scene.add(anillo);
+    ondasActivas.push({ mesh: anillo, t: 0 });
+
+    console.log('💥 ' + hab.nombre + ' | impactos: ' + impactos + ' | MP: ' + Math.floor(playerMana));
+}
+
+// Avanza recargas y ondas. Se llama cada frame desde el bucle principal.
+function actualizarHabilidades(delta) {
+    for (const id in cooldownsHabilidad) {
+        if (cooldownsHabilidad[id] > 0) {
+            cooldownsHabilidad[id] = Math.max(0, cooldownsHabilidad[id] - delta);
+        }
+    }
+}
+
+function actualizarOndas(delta) {
+    for (let i = ondasActivas.length - 1; i >= 0; i--) {
+        const o = ondasActivas[i];
+        o.t += delta;
+        const k = o.t / 0.45;
+        if (k >= 1) {
+            scene.remove(o.mesh);
+            o.mesh.geometry.dispose();
+            o.mesh.material.dispose();
+            ondasActivas.splice(i, 1);
+        } else {
+            o.mesh.scale.setScalar(1 + k * 0.6);
+            o.mesh.material.opacity = 0.55 * (1 - k);
+        }
+    }
+}
+
+// Tecla R: devuelve al Axie a su punto de aparicion. Documentado en el
+// README desde el principio pero nunca estuvo implementado. Sin cooldown:
+// sirve para desatascarse, no para moverse.
+function reiniciarPosicionJugador() {
+    if (!playerModel || !smoothPlayerPos) return;
+    playerModel.position.copy(playerSpawnPosition);
+    playerModel.position.y = GROUND_Y;
+    smoothPlayerPos.copy(playerSpawnPosition);
+    smoothPlayerPos.y = GROUND_Y;
+    smoothTargetPos.copy(smoothPlayerPos);
+    isMovingToTarget = false;
+    isAutoMovingToTarget = false;
+    targetPosition = null;
+    console.log('↩️ Posicion reiniciada');
+}
+
+// ============================================================
 // MARCADOR (tecla Tab, mantenida)
 // ============================================================
 let marcadorElemento = null;
@@ -5382,6 +5648,14 @@ document.addEventListener('keydown', (e) => {
         if (shopOpen) return;
         teletransporteAlNexo();
         return;
+    }
+
+    // --- Teclas de habilidad (Q/W/E/R): todo lo decide el catalogo ---
+    // Para reasignar teclas se cambia 'tecla' en src/config/habilidades.js.
+    // Ojo: 'b' (nexo) y 'r' (reset) NO deben solaparse con el catalogo.
+    if (gameStarted && !isAITrainingMode) {
+        const tecla = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (HABILIDADES_POR_TECLA[tecla]) { usarHabilidad(HABILIDADES_POR_TECLA[tecla]); return; }
     }
 });
 
@@ -5644,6 +5918,10 @@ function gameLoop(time, token) {
         if (!proj.active) playerProjectiles.splice(i, 1);
     }
     if (mixer && !isPlayerDead) mixer.update(delta);
+    // Habilidades: recargas, ondas visuales y estado del panel.
+    actualizarHabilidades(delta);
+    actualizarOndas(delta);
+    updateAbilityHUD();
 
     if (!gameStarted) {
         startTimer -= delta;
