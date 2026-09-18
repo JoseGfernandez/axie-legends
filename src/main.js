@@ -3014,12 +3014,39 @@ class Minion {
                 // converge a el, pero con suavizado en vez de a velocidad
                 // completa: asi cuando el target muere y salta a otro del
                 // extremo contrario no hay tiron lateral.
-                // El mage no se pega al objetivo: se queda a su distancia
-                // de combate (combatOffsetZ), detras del melee. Sin esto el
-                // offset se asignaba en el constructor y no se leia nunca,
-                // asi que los mages acababan amontonados en la mele.
-                const holdDist = this.combatOffsetZ !== 0 ? Math.abs(this.combatOffsetZ) : 0;
-                const advance = (dist - holdDist) > 0.05 ? 1 : (dist - holdDist) < -0.05 ? -1 : 0;
+                // El mage no pasa por delante del melee de su bando: se
+                // queda detras del melee mas adelantado, a la distancia de
+                // combate. Medir la distancia al enemigo no bastaba (el
+                // melee tambien acaba a rango de golpe, asi que quedaban
+                // casi a la par), y cuando el melee moria el mage se veia
+                // solo y saltaba de golpe hacia delante. Con el frente del
+                // melee como tope, ni se adelanta ni da el salto.
+                let advance = 1;
+                if (this.combatOffsetZ !== 0) {
+                    const adelanto = Math.abs(this.combatOffsetZ);
+                    // Frente del melee aliado vivo mas adelantado.
+                    let frenteMelee = null;
+                    for (const al of myAllies) {
+                        if (al === this || al.isDead) continue;
+                        if (al.tipo !== 'melee' && !al.esBig) continue;
+                        if (frenteMelee === null ||
+                            (this.isEnemy ? al.group.position.z < frenteMelee : al.group.position.z > frenteMelee)) {
+                            frenteMelee = al.group.position.z;
+                        }
+                    }
+                    if (frenteMelee !== null) {
+                        const topeZ = this.isEnemy ? frenteMelee + adelanto : frenteMelee - adelanto;
+                        const puedeAvanzar = this.isEnemy ? this.group.position.z > topeZ : this.group.position.z < topeZ;
+                        if (puedeAvanzar) {
+                            advance = 1;
+                        } else {
+                            // Ya esta por delante del tope: vuelve atras en
+                            // vez de quedarse quieto, para recuperar su sitio
+                            // cuando el melee retrocede o muere y la linea cae.
+                            advance = -1;
+                        }
+                    }
+                }
                 this.group.position.z += (dz / norm) * this.speed * delta * advance;
                 // La X SI va hacia el objetivo, pero suavizada y sin el
                 // tiron de antes. El slot lateral solo abre hueco cuando ya
