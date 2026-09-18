@@ -2001,10 +2001,15 @@ function updateDynamicHUDForCamera() {
 }
 
 class Minion {
-    constructor(x, z, isEnemy = false, tipo = 'melee', formationIndex = 0) {
+    constructor(x, z, isEnemy = false, tipo = 'melee', formationIndex = 0, typeIndex = null) {
         this.isEnemy = isEnemy;
         this.tipo = tipo;
         this.formationIndex = formationIndex;
+        // Posicion del minion DENTRO de su tipo (0..n-1). El slot lateral
+        // sale de aqui, no del indice global de la oleada: con 3 melee en
+        // vez de 5, el primer mage tenia indice global 3 y su slot salia
+        // negativo, descuadrando la linea de atras.
+        this.typeIndex = (typeIndex === null || typeIndex === undefined) ? formationIndex : typeIndex;
         this.minionType = tipo;
 
         // TAREA D: el minion grande ('big') es un melee potenciado.
@@ -2062,8 +2067,12 @@ class Minion {
             this.combatOffsetX = esBig ? 0 : (meleeSlots[formationIndex % meleeSlots.length] || 0);
             this.combatOffsetZ = 0;
         } else {
+            // Slot por posicion DENTRO de los mages (typeIndex), no por un
+            // desplazamiento fijo de 5: con 3 melee en vez de 5, el indice
+            // del mage arrancaba en 3 y (formationIndex - 5) daba slots
+            // negativos, asi que la linea de atras salia descuadrada.
             const mageSlots = [0, -1.2, 1.2];
-            this.combatOffsetX = mageSlots[(formationIndex - 5) % mageSlots.length] || 0;
+            this.combatOffsetX = mageSlots[this.typeIndex % mageSlots.length] || 0;
             this.combatOffsetZ = isEnemy ? -2.5 : 2.5;
         }
         // El slot es un desplazamiento lateral relativo al bando: el
@@ -3004,7 +3013,7 @@ class Minion {
                         }
                     }
                 }
-                const desiredX = refX + this.mySlotX * this.deployProgress;
+                const desiredX = refX + this.mySlotX;
                 const smoothFactor = 2.0 * this.deployProgress;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, smoothFactor * delta);
             } else {
@@ -3052,7 +3061,7 @@ class Minion {
                 // tiron de antes. El slot lateral solo abre hueco cuando ya
                 // esta cerca (deployProgress), asi que de lejos converge al
                 // eje del objetivo y no se va por los lados a no pelear.
-                const desiredX = refX + this.mySlotX * this.deployProgress;
+                const desiredX = refX + this.mySlotX;
                 const lateralSmooth = 1.8;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, lateralSmooth * delta);
             }
@@ -3062,7 +3071,10 @@ class Minion {
             let nz = this.group.position.z + this.direction * this.speed * delta;
             nz = Math.max(-CONFIG.minionLimitZ, Math.min(CONFIG.minionLimitZ, nz));
             this.group.position.z = nz;
-            this.group.position.x += (0 - this.group.position.x) * Math.min(1, 2 * delta);
+            // Sin objetivo (salida del nexo) mantiene SU carril de
+            // formacion. Antes convergia a 0 y todos salian apinados en
+            // el centro, para abrirse solo al llegar al enemigo.
+            this.group.position.x += (this.mySlotX - this.group.position.x) * Math.min(1, 2 * delta);
             this.group.rotation.y = this.isEnemy ? Math.PI : 0;
             this.deployProgress += (0 - this.deployProgress) * Math.min(1, 1.4 * delta);
         }
@@ -3302,12 +3314,12 @@ function processSpawnQueue(delta) {
         const item = spawnQueue[i];
         if (spawnQueueTimer >= item.delay) {
             if (item.team === 'ally') {
-                const m = new Minion(item.x, item.z, false, item.tipo, item.index);
+                const m = new Minion(item.x, item.z, false, item.tipo, item.index, item.formationCol);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 aliados.push(m);
             } else {
-                const m = new Minion(item.x, item.z, true, item.tipo, item.index);
+                const m = new Minion(item.x, item.z, true, item.tipo, item.index, item.formationCol);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 enemigos.push(m);
