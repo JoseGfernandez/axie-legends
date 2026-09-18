@@ -365,6 +365,12 @@ const ECONOMY = {
     PENALTY_PLAYER_DEATH: 0,
 };
 
+// Z de la torre de tier 2 de cada bando. Hasta pasarla, los minions van
+// en fila india y no abren el abanico. Constantes de MODULO: las usa
+// Minion.update, no solo spawnWave.
+const TORRE_2_ALIADA_Z = -6;
+const TORRE_2_ENEMIGA_Z = 5.98;
+
 const PLAYER_SHOP_CATALOG = {
     potions: {
         hp: { id: 'hp', emoji: '🧪', name: 'Poción de HP', desc: '+50 HP (click en HUD)', color: '#ff6644', cost: 25, max: 10,
@@ -3262,10 +3268,6 @@ function spawnWave() {
     // la caja del nexo.
     const NEXUS_SPAWN_MARGIN = 3.0;
 
-    // Z de la torre de tier 2 de cada bando. Hasta pasarla, los
-    // minions van en fila india y no abren el abanico.
-    const TORRE_2_ALIADA_Z = -6;
-    const TORRE_2_ENEMIGA_Z = 5.98;
 
     // El indice de formacion es POR BANDO, no global. Con un contador unico,
     // los aliados se quedaban con los indices bajos y los enemigos arrancaban
