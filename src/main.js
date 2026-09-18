@@ -939,8 +939,8 @@ function procesarLanes() {
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
-        createTower(4.0, 18, true, 1);
-        createTower(4.0, 6, true, 2);
+        createTower(2.46, 17.86, true, 1);
+        createTower(2.32, 5.86, true, 2);
     }
     inicializarCamaraFija();
 }
@@ -3069,8 +3069,8 @@ function spawnWave() {
     // Deben coincidir con la z del nexo en createScene (arriba). Si se
     // mueve el nexo, hay que mover esto: antes estaban en +-21 mientras
     // el nexo ya habia ido a +-23, y los minions salian descolgados.
-    const NEXUS_Z_ALLY = -23;
-    const NEXUS_Z_ENEMY = 23;
+    const NEXUS_Z_ALLY = -23.91;
+    const NEXUS_Z_ENEMY = 23.77;
     const LANE_X = 0;
     const MELEE_ROWS = 2;
     const MELEE_PER_ROW = 3;
@@ -5034,8 +5034,8 @@ function abandonGame() {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(4.0, 18, true, 1);
-    createTower(4.0, 6, true, 2);
+    createTower(2.46, 17.86, true, 1);
+    createTower(2.32, 5.86, true, 2);
     gameStarted = false;
     startTimer = CONFIG.SPAWN_DELAY;
     waveNumber = 1;
@@ -5309,8 +5309,8 @@ async function startAIGame(axieId) {
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
     createTower(-2.5, -18, false, 1);
     createTower(-2.5, -6, false, 2);
-    createTower(4.0, 18, true, 1);
-    createTower(4.0, 6, true, 2);
+    createTower(2.46, 17.86, true, 1);
+    createTower(2.32, 5.86, true, 2);
     resetEnemyAxie();
     inicializarCamaraFija();
     resetDynamicCamera();
