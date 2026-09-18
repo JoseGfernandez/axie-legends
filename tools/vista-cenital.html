@@ -118,6 +118,8 @@ let offset = { x:0, z:0 };       // agarre: distancia entre el punto y el centro
 let hover = null;
 let cambios = {};                // label -> {x, z}
 let fallos = [];
+let zoom = 1;                    // factor de zoom sobre el encuadre automatico
+let pan  = { x: 0, z: 0 };       // desplazamiento del encuadre
 
 // posicion de reposo conocida, para poder restaurar y para el diff
 const ORIGINAL = {};
@@ -179,11 +181,39 @@ function esperarEscenario() {
 function transformador() {
   const w = D.widths;
   const pad = 90;
-  const s = Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
-                     (innerHeight - pad * 2) / (w.laneLargo + 10));
-  const cx = innerWidth / 2, cy = innerHeight / 2;
-  return { s, px: (x) => cx + x * s, py: (z) => cy + z * s, inv: (px, py) => ({ x: (px - cx) / s, z: (py - cy) / s }) };
+  const base = Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
+                        (innerHeight - pad * 2) / (w.laneLargo + 10));
+  const s = base * zoom;
+  // el pan se expresa en unidades de mundo y se centra en el carril
+  const cx = innerWidth / 2 + pan.x * s, cy = innerHeight / 2 + pan.z * s;
+  return {
+    s,
+    px: (x) => cx + x * s,
+    py: (z) => cy + z * s,
+    inv: (px, py) => ({ x: (px - cx) / s, z: (py - cy) / s }),
+  };
 }
+
+// Zoom manteniendo fijo el punto de mundo bajo el cursor: es lo que espera
+// la mano. Se calcula la coordenada de mundo del cursor antes del zoom y se
+// ajusta el pan para que esa misma coordenada caiga bajo el cursor despues.
+function zoomEn(mx, my, factor) {
+  if (!D) return;
+  const nuevoZoom = Math.max(0.4, Math.min(12, zoom * factor));
+  if (nuevoZoom === zoom) return;
+  const p = T.inv(mx, my);
+  zoom = nuevoZoom;
+  const w = D.widths, pad = 90;
+  const base = Math.min((innerWidth - pad * 2) / (w.laneReal + 10),
+                        (innerHeight - pad * 2) / (w.laneLargo + 10));
+  const s = base * zoom;
+  // queremos: cx + p.x*s = mx  ->  pan.x = (mx - innerWidth/2)/s - p.x
+  pan.x = (mx - innerWidth / 2) / s - p.x;
+  pan.z = (my - innerHeight / 2) / s - p.z;
+  T = transformador();
+}
+
+function encuadrarTodo() { zoom = 1; pan = { x: 0, z: 0 }; }
 
 function rectMundo(x0, x1, z0, z1, relleno, borde, grosor) {
   const X0 = T.px(x0), X1 = T.px(x1), Y0 = T.py(z0), Y1 = T.py(z1);
@@ -416,8 +446,21 @@ window.addEventListener('mousemove', (e) => {
 
 addEventListener('mouseup', () => { arrastrando = false; canvas.style.cursor = 'crosshair'; });
 
+// Rueda del raton = zoom hacia el cursor. passive:false para poder
+// cancelar el scroll de la pagina.
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (!T) return;
+  const r = canvas.getBoundingClientRect();
+  zoomEn(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+}, { passive: false });
+
 addEventListener('keydown', (e) => {
-  if (e.key === 'r' || e.key === 'R') location.reload();
+  if (e.key === 'r' || e.key === 'R') { location.reload(); return; }
+  // Zoom por teclado: + / - y 0 para reencuadrar.
+  if (e.key === '+' || e.key === '=') { if (T) zoomEn(innerWidth / 2, innerHeight / 2, 1.25); return; }
+  if (e.key === '-' || e.key === '_') { if (T) zoomEn(innerWidth / 2, innerHeight / 2, 1 / 1.25); return; }
+  if (e.key === '0') { encuadrarTodo(); return; }
   if (e.key === 'c' || e.key === 'C') {
     const txt = document.getElementById('out-json').textContent;
     if (txt) navigator.clipboard.writeText(txt).then(() => {
