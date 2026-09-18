@@ -3022,10 +3022,26 @@ class Minion {
             // es justo lo que se veia: todos clavados en 3.11 al atacar.
             // Contra estructuras se ataca DESDE EL CARRIL: la referencia
             // lateral es el eje (0) y solo se avanza en profundidad.
-            const refX = esEstructura ? 0 : targetPos.x;
+            // Las torres estan desplazadas del eje (azules -2.5, rojas
+            // 3.11) y se atacan desde el carril, no desde su borde.
+            // Contra minions tampoco se converge a la x del objetivo:
+            // el que persigue a un enemigo que esta a un lado arrastra
+            // a toda la tropa a ese lado (los mages solos contra mages
+            // acababan apinados en un borde). Se avanza por el eje y el
+            // hueco lateral lo da el slot.
+            const refX = 0;
 
             const distToAttack = Math.max(0, dist - attackRange);
-            const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
+            // El abanico NO se abre hasta que el minion haya pasado las
+            // torres de su lado: hasta ahi va en fila india y no se rompe
+            // la linea. Antes se abria por distancia al objetivo, asi que
+            // la fila se deshacia antes de tiempo y los de atras se
+            // trababan entre ellos y con las torres.
+            const pasoLasTorres = this.isEnemy
+                ? this.group.position.z < TORRE_2_ENEMIGA_Z
+                : this.group.position.z > TORRE_2_ALIADA_Z;
+            const deployTarget =
+                (pasoLasTorres && distToAttack < DEPLOY_TRIGGER_DIST) ? 1 : 0;
             // Despliegue lateral progresivo. Con 2.5 el minion se abria de golpe
         // al entrar en rango (tiron brusco); 1.1 lo reparte a lo largo de
         // ~1.5 s, que es el amago ordenado de los minions de LoL.
@@ -3062,7 +3078,7 @@ class Minion {
                         }
                     }
                 }
-                const desiredX = refX + this.mySlotX;
+                const desiredX = refX + this.mySlotX * this.deployProgress;
                 const smoothFactor = 2.0 * this.deployProgress;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, smoothFactor * delta);
             } else {
@@ -3106,11 +3122,14 @@ class Minion {
                     }
                 }
                 this.group.position.z += (dz / norm) * this.speed * delta * advance;
-                // La X SI va hacia el objetivo, pero suavizada y sin el
-                // tiron de antes. El slot lateral solo abre hueco cuando ya
-                // esta cerca (deployProgress), asi que de lejos converge al
-                // eje del objetivo y no se va por los lados a no pelear.
-                const desiredX = refX + this.mySlotX;
+                // La X va hacia el objetivo, pero el hueco lateral se abre
+                // PROPORCIONALMENTE al despliegue: de lejos todos convergen
+                // al eje (refX) y la fila india se mantiene; al pasar las
+                // torres se abren a su slot. Antes se usaba mySlotX directo,
+                // asi que los mages se abrian desde lejos y, al quedar solos
+                // contra otros mages sin melee que los frenara, acababan
+                // todos apinados a un lado del carril.
+                const desiredX = refX + this.mySlotX * this.deployProgress;
                 const lateralSmooth = 1.8;
                 this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, lateralSmooth * delta);
             }
@@ -3242,6 +3261,11 @@ function spawnWave() {
     // quedado rezagados. Medido en el carril: los melee no deben pisar
     // la caja del nexo.
     const NEXUS_SPAWN_MARGIN = 3.0;
+
+    // Z de la torre de tier 2 de cada bando. Hasta pasarla, los
+    // minions van en fila india y no abren el abanico.
+    const TORRE_2_ALIADA_Z = -6;
+    const TORRE_2_ENEMIGA_Z = 5.98;
 
     // El indice de formacion es POR BANDO, no global. Con un contador unico,
     // los aliados se quedaban con los indices bajos y los enemigos arrancaban
