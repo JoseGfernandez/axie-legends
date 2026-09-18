@@ -21,3 +21,5 @@ _backups/
 # IDE
 .vscode/
 .idea/
+*.bak_*
+_entry_tmp.mjs
