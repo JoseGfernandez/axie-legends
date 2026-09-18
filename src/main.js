@@ -81,7 +81,10 @@ const CONFIG = {
     MINION_AGGRO_RANGE_EXTENDED: 15.0,
     MAX_ITEM_SLOTS: 6,
     POTION_USE_COOLDOWN: 1.5,
-    DEPLOY_TRIGGER_DIST: 0.5,
+    // Distancia al objetivo a la que el minion abre su slot lateral.
+    // Con 0.5 se abrian al chocar y el reparto se veia tarde; 2.2 los
+    // reparte desde el centro a medida que se acercan, como en LoL.
+    DEPLOY_TRIGGER_DIST: 2.2,
     MINION_TOWER_ATTACK_RANGE: 25,
     AXIES_BASE_PATH: `${import.meta.env.BASE_URL}assets/axies/`,
     MINION_GLB_MAGE_ENEMY: `${import.meta.env.BASE_URL}assets/minions/mage2_bone.glb`,
@@ -641,9 +644,10 @@ function getHealthBarTexture(segments, visibleSegments, isEnemy) {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 128, 20);
     ctx.strokeStyle = '#fff'; ctx.strokeRect(0, 0, 128, 20);
     const sw = 124 / segments;
-    // Colores tipo LoL: verde para aliado, rojo para enemigo. El par
-    // claro/oscuro da el degradado por segmentos que se ve en el juego.
-    const colors = isEnemy ? ['#c62828', '#e53935'] : ['#2e9e4f', '#41c463'];
+    // Verde intenso para todo el mundo, aliado y enemigo: el usuario quiere
+    // leer la vida de un vistazo sin distinguir bandos por color. El par
+    // oscuro/brillante da el degradado por segmentos.
+    const colors = isEnemy ? ['#12b01c', '#52ff4a'] : ['#12b01c', '#52ff4a'];
     for (let i = 0; i < visibleSegments; i++) {
         ctx.fillStyle = i % 2 === 0 ? colors[0] : colors[1];
         ctx.fillRect(2 + i * sw, 2, sw - 1, 16);
@@ -2958,7 +2962,7 @@ class Minion {
             // Despliegue lateral progresivo. Con 2.5 el minion se abria de golpe
         // al entrar en rango (tiron brusco); 1.1 lo reparte a lo largo de
         // ~1.5 s, que es el amago ordenado de los minions de LoL.
-        this.deployProgress += (deployTarget - this.deployProgress) * Math.min(1, 1.1 * delta);
+        this.deployProgress += (deployTarget - this.deployProgress) * Math.min(1, 0.9 * delta);
             if (this.deployProgress < 0.01) this.deployProgress = 0;
             if (this.deployProgress > 0.99) this.deployProgress = 1;
 
@@ -2997,12 +3001,21 @@ class Minion {
             } else {
                 this.state = 'move';
                 const norm = dist > 0.1 ? dist : 1;
-                this.group.position.z += (dz / norm) * this.speed * delta;
-                this.group.position.x += (dx / norm) * this.speed * delta;
-                if (this.deployProgress > 0.01) {
-                    const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
-                    this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, 1.5 * this.deployProgress * delta);
-                }
+                // Avanza SOLO en profundidad, hacia el objetivo. La X no
+                // persigue al objetivo: cuando el target moria y saltaba a
+                // otro del extremo contrario, dx cambiaba de signo y el
+                // minion cruzaba el carril de golpe. Ahora la X la manda
+                // siempre el slot de formacion, con suavizado.
+                // El mage no se pega al objetivo: se queda a su distancia
+                // de combate (combatOffsetZ), detras del melee. Sin esto el
+                // offset se asignaba en el constructor y no se leia nunca,
+                // asi que los mages acababan amontonados en la mele.
+                const holdDist = this.combatOffsetZ !== 0 ? Math.abs(this.combatOffsetZ) : 0;
+                const advance = (dist - holdDist) > 0.05 ? 1 : (dist - holdDist) < -0.05 ? -1 : 0;
+                this.group.position.z += (dz / norm) * this.speed * delta * advance;
+                const desiredX = targetPos.x + this.mySlotX * this.deployProgress;
+                const lateralSmooth = 2.2;
+                this.group.position.x += (desiredX - this.group.position.x) * Math.min(1, lateralSmooth * delta);
             }
         } else {
             this.target = null;
