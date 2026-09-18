@@ -6132,6 +6132,83 @@ document.addEventListener('DOMContentLoaded', () => {
     showMainMenu();
 });
 
+
+// ---------------------------------------------------------------------
+// HOOKS DE DEPURACION (vista cenital)
+// ---------------------------------------------------------------------
+// Expone el estado interno a tools/vista-cenital.html: escena, camara,
+// renderer y las posiciones vivas del carril. Sin esto la vista cenital
+// tendria que duplicar la logica de carga y se desincronizaria.
+window.__debug = {
+    THREE,
+    get scene() { return scene; },
+    get camera() { return camera; },
+    get renderer() { return renderer; },
+    get groundY() { return GROUND_Y; },
+    get laneTopY() { return LANE_TOP_Y; },
+    get groundReady() { return groundReady; },
+    get widths() {
+        // Ancho visual del asfalto: LANE_TARGET_WIDTH es el del modelo
+        // entero (incluye arcen). Estos son los topes logicos del motor.
+        return {
+            laneReal: LANE_TARGET_WIDTH,          // ancho del modelo
+            laneUtil: CONFIG.MINION_LANE_LIMIT_X, // ancho jugable
+            laneLargo: LANE_TARGET_LENGTH,
+            limitZ: CONFIG.MINION_LANE_LIMIT_Z,
+        };
+    },
+    get actors() {
+        // Todo lo que se coloca en el carril, con su ancho real medido del
+        // bbox escalado. La vista cenital dibuja estos rectangulos.
+        const out = [];
+        const push = (label, side, obj, x, z) => {
+            if (!obj || !obj.group) return;
+            const box = new THREE.Box3().setFromObject(obj.group);
+            const size = box.getSize(new THREE.Vector3());
+            out.push({
+                label, side, x, z,
+                width: size.x, depth: size.z, height: size.y,
+                minX: box.min.x, maxX: box.max.x,
+                minZ: box.min.z, maxZ: box.max.z,
+                health: obj.health, maxHealth: obj.maxHealth,
+                isDead: !!obj.isDead,
+            });
+        };
+        if (nexusAliado) push('Nexo azul', 'ally', nexusAliado, nexusAliado.group.position.x, nexusAliado.group.position.z);
+        if (nexusEnemigo) push('Nexo rojo', 'enemy', nexusEnemigo, nexusEnemigo.group.position.x, nexusEnemigo.group.position.z);
+        if (shopAliada) push('Tienda azul', 'ally', shopAliada, shopAliada.group.position.x, shopAliada.group.position.z);
+        if (shopEnemiga) push('Tienda roja', 'enemy', shopEnemiga, shopEnemiga.group.position.x, shopEnemiga.group.position.z);
+        towers.forEach((tw, i) => {
+            if (!tw || !tw.group) return;
+            push('Torre ' + (tw.isEnemy ? 'roja' : 'azul') + ' T' + (tw.tier || 1), tw.isEnemy ? 'enemy' : 'ally', tw, tw.group.position.x, tw.group.position.z);
+        });
+        if (playerModel) push('Jugador', 'ally', { group: playerModel }, playerModel.position.x, playerModel.position.z);
+        if (enemyAxieModel) push('Axie rival', 'enemy', { group: enemyAxieModel }, enemyAxieModel.position.x, enemyAxieModel.position.z);
+        return out;
+    },
+    get config() { return CONFIG; },
+
+    // Arranque automatico para la vista cenital: monta una partida sin
+    // pasar por el menu, para que el escenario (carril, torres, nexos y
+    // tiendas) exista y se pueda medir. Idempotente: si ya hay escenario,
+    // no hace nada.
+    //
+    // Usa startGame (partida normal, jugador humano) y NO startAIGame: en
+    // modo IA vs IA los minions se mueven solos y las posiciones dejan de
+    // ser las de reposo, que son las que interesa medir. En modo normal el
+    // escenario queda quieto hasta que el jugador se mueve.
+    async startCenital() {
+        if (groundReady && nexusAliado && nexusEnemigo && towers.length > 0 && shopAliada && shopEnemiga) {
+            return { ok: true, yaMontado: true };
+        }
+        const todos = getAllAxies();
+        const pick = todos[0].id;
+        await startGame(pick);
+        return { ok: true, yaMontado: false };
+    },
+};
+console.log('🔍 window.__debug listo: vista cenital disponible');
+
 import './js/hub-control.js';
 import './js/inject-memory.js';
 

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Axie Legends · Vista cenital del carril</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d18; color:#d8d8e8; font-family:'Segoe UI',Tahoma,sans-serif; overflow:hidden; }
+  canvas#top { display:block; width:100vw; height:100vh; }
+  iframe#juego { position:fixed; width:1280px; height:800px; left:-4000px; top:0; border:0; }
+  #hud {
+    position:fixed; top:12px; left:12px; z-index:10;
+    background:rgba(12,12,24,0.93); border:1px solid #2c2c48; border-radius:10px;
+    padding:12px 14px; font-size:12px; line-height:1.65; min-width:270px;
+    box-shadow:0 6px 22px rgba(0,0,0,0.55);
+  }
+  #hud h1 { font-size:13px; margin-bottom:8px; color:#8fb4ff; letter-spacing:0.4px; }
+  #hud .row { display:flex; justify-content:space-between; gap:14px; }
+  #hud .row b { color:#fff; font-weight:600; }
+  #hud .sep { height:1px; background:#2c2c48; margin:9px 0; }
+  #hud .ally { color:#5aa9ff; } #hud .enemy { color:#ff6a6a; }
+  #hud .warn { color:#ffbf4d; } #hud .ok { color:#5fd68a; }
+  #legend {
+    position:fixed; bottom:12px; left:12px; z-index:10;
+    background:rgba(12,12,24,0.93); border:1px solid #2c2c48; border-radius:10px;
+    padding:10px 14px; font-size:11px; line-height:1.7; max-width:560px;
+  }
+  #legend .sw { display:inline-block; width:11px; height:11px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+  #status {
+    position:fixed; top:12px; right:12px; z-index:10;
+    background:rgba(12,12,24,0.93); border:1px solid #2c2c48; border-radius:10px;
+    padding:10px 14px; font-size:12px; max-width:300px; line-height:1.6;
+  }
+  #status.err { border-color:#7a2c2c; color:#ff9d9d; }
+  #fails { color:#ffbf4d; margin-top:6px; font-size:11px; line-height:1.55; }
+  kbd { background:#252540; border:1px solid #3a3a5c; border-radius:4px; padding:1px 5px; font-size:11px; }
+</style>
+</head>
+<body>
+<canvas id="top"></canvas>
+<iframe id="juego" src="/axie-legends/"></iframe>
+
+<div id="hud">
+  <h1>🗺️ VISTA CENITAL DEL CARRIL</h1>
+  <div class="row"><span>Ancho modelo</span><b id="w-modelo">—</b></div>
+  <div class="row"><span>Ancho jugable</span><b id="w-util">—</b></div>
+  <div class="row"><span>Largo</span><b id="w-largo">—</b></div>
+  <div class="sep"></div>
+  <div class="row"><span class="ally">Mín X azul</span><b id="min-ally">—</b></div>
+  <div class="row"><span class="enemy">Máx X rojo</span><b id="max-enemy">—</b></div>
+</div>
+
+<div id="status">Cargando el juego…<div id="fails"></div></div>
+
+<div id="legend">
+  <div><span class="sw" style="background:#1b3a6b;border:1px solid #4d8bd6"></span>Carril (modelo, ancho total) &nbsp;
+       <span class="sw" style="background:#123a2a;border:1px solid #3fbf7f"></span>Zona jugable (límite minions)</div>
+  <div><span class="sw" style="background:#2e6fd6"></span>Aliado &nbsp;
+       <span class="sw" style="background:#d64a4a"></span>Enemigo &nbsp;
+       <span class="sw" style="background:#b08cff"></span>Jugador</div>
+  <div>Rectángulo = <b>bbox real</b> del modelo escalado. Si cruza la línea del borde, ese objeto <span class="warn">sobresale</span>.</div>
+  <div style="margin-top:6px;color:#8a8aa8">Pasa el ratón por un objeto para ver detalle. <kbd>R</kbd> recarga y recalcula.</div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Vista cenital de depuracion.
+//
+// Monta el juego real en un iframe fuera de pantalla, espera a que exponga
+// window.__debug (src/main.js) y dibuja en un canvas 2D el contorno del
+// carril y el bbox REAL de cada objeto, leido en vivo del juego.
+//
+// No duplica logica: lo que se ve aqui es exactamente lo que hay en la escena.
+// ---------------------------------------------------------------------------
+
+const canvas = document.getElementById('top');
+const ctx = canvas.getContext('2d');
+const iframe = document.getElementById('juego');
+
+let D = null;              // window.__debug del juego
+let lastActors = [];
+let hover = null;
+let fallos = [];
+
+function fail(msg) { if (!fallos.includes(msg)) fallos.push(msg); renderFails(); }
+function renderFails() {
+  const f = document.getElementById('fails');
+  if (f) f.innerHTML = fallos.map(x => '• ' + x).join('<br>');
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.floor(innerWidth  * dpr);
+  canvas.height = Math.floor(innerHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize);
+resize();
+
+// --- conectar con el juego ------------------------------------------------
+function conectar() {
+  let w;
+  try { w = iframe.contentWindow; } catch (e) { fail('no se puede acceder al iframe: ' + e.message); return; }
+
+  if (!w || !w.__debug) { setTimeout(conectar, 300); return; }
+  D = w.__debug;
+
+  // arrancar partida si hace falta (sin menu)
+  if (D.startCenital) {
+    try { D.startCenital(); } catch (e) { fail('startCenital: ' + e.message); }
+  }
+  esperarEscenario();
+}
+
+function esperarEscenario() {
+  let ok = false;
+  try {
+    if (D.groundReady) {
+      const a = D.actors;
+      ok = a.some(o => o.label.startsWith('Nexo'));
+    }
+  } catch (e) { fail('lectura de actores: ' + e.message); }
+  if (!ok) { setTimeout(esperarEscenario, 300); return; }
+  document.getElementById('status').innerHTML =
+    '<b class="ok">Listo.</b> Escenario montado en el iframe.<div id="fails"></div>';
+  renderFails();
+  pintar();
+}
+
+// --- geometria ------------------------------------------------------------
+// El carril mide `ancho` en X y `largo` en Z. Se dibuja con X horizontal y
+// Z vertical (abajo = +Z, base roja), que es como se lee desde arriba.
+function transformador() {
+  const w = D.widths;
+  const pad = 80;
+  const spanX = w.laneReal + 10;
+  const spanZ = w.laneLargo + 10;
+  const s = Math.min((innerWidth - pad * 2) / spanX, (innerHeight - pad * 2) / spanZ);
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  return { s, px: (x) => cx + x * s, py: (z) => cy + z * s };
+}
+
+let T = null;
+
+function rectMundo(x0, x1, z0, z1, relleno, borde, etiqueta, sub) {
+  const t = T;
+  const X0 = t.px(x0), X1 = t.px(x1), Y0 = t.py(z0), Y1 = t.py(z1);
+  const w = Math.abs(X1 - X0), h = Math.abs(Y1 - Y0);
+  const x = Math.min(X0, X1), y = Math.min(Y0, Y1);
+  if (relleno) { ctx.fillStyle = relleno; ctx.fillRect(x, y, w, h); }
+  if (borde) { ctx.strokeStyle = borde; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5); }
+  if (etiqueta) {
+    const cx = (X0 + X1) / 2, cy = (Y0 + Y1) / 2;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '600 11px Segoe UI, sans-serif';
+    const tw = ctx.measureText(etiqueta).width + 8;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(cx - tw / 2, cy - 17, tw, 14);
+    ctx.fillStyle = '#fff'; ctx.fillText(etiqueta, cx, cy - 10);
+    if (sub) {
+      ctx.font = '10px Segoe UI, sans-serif';
+      const sw = ctx.measureText(sub).width + 8;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(cx - sw / 2, cy - 2, sw, 13);
+      ctx.fillStyle = '#cfcfee'; ctx.fillText(sub, cx, cy + 4.5);
+    }
+  }
+}
+
+// --- dibujo ---------------------------------------------------------------
+function pintar() {
+  requestAnimationFrame(pintar);
+  if (!D) return;
+  let acts, w;
+  try { acts = D.actors; w = D.widths; } catch (e) { fail('actores: ' + e.message); return; }
+
+  T = transformador();
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+
+  const half = w.laneReal / 2, zHalf = w.laneLargo / 2;
+  rectMundo(-half, half, -zHalf, zHalf, '#1b3a6b', '#4d8bd6');
+  rectMundo(-w.laneUtil, w.laneUtil, -w.limitZ, w.limitZ, '#123a2a', '#3fbf7f');
+
+  // eje central
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(T.px(0), T.py(-zHalf)); ctx.lineTo(T.px(0), T.py(zHalf));
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // bordes del carril
+  [-half, half].forEach((bx, i) => {
+    ctx.strokeStyle = i ? '#ff6a6a' : '#5aa9ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(T.px(bx), T.py(-zHalf)); ctx.lineTo(T.px(bx), T.py(zHalf)); ctx.stroke();
+  });
+
+  // etiquetas
+  ctx.font = '600 11px Segoe UI, sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#5aa9ff'; ctx.fillText('borde −' + half, T.px(-half) + 6, T.py(-zHalf) - 14);
+  ctx.fillStyle = '#ff6a6a';
+  const ld = 'borde +' + half;
+  ctx.fillText(ld, T.px(half) - ctx.measureText(ld).width - 6, T.py(-zHalf) - 14);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#9aa0c0';
+  ctx.fillText('Z −' + zHalf + '  (base azul)', T.px(0), T.py(-zHalf) - 34);
+  ctx.fillText('Z +' + zHalf + '  (base roja)',  T.px(0), T.py(zHalf) + 34);
+
+  // actores
+  lastActors = acts;
+  acts.forEach((a, i) => {
+    const aliado = a.side === 'ally';
+    const esJug = a.label === 'Jugador';
+    const color = esJug ? 'rgba(176,140,255,0.85)' : aliado ? 'rgba(46,111,214,0.85)' : 'rgba(214,74,74,0.85)';
+    const borde = hover === i ? '#ffffff' : esJug ? '#d0b8ff' : aliado ? '#8fc0ff' : '#ff9d9d';
+    rectMundo(a.minX, a.maxX, a.minZ, a.maxZ, color, borde, a.label,
+              'x ' + a.x.toFixed(2) + '   w ' + a.width.toFixed(2));
+  });
+
+  // bordes violados
+  let minAlly = 0, maxEnemy = 0; const viola = [];
+  acts.forEach(a => {
+    if (a.minX < -half) { viola.push(a.label + ' → x ' + a.minX.toFixed(2)); minAlly = Math.min(minAlly, a.minX); }
+    if (a.maxX >  half) { viola.push(a.label + ' → x ' + a.maxX.toFixed(2)); maxEnemy = Math.max(maxEnemy, a.maxX); }
+  });
+
+  document.getElementById('w-modelo').textContent  = w.laneReal + '  (±' + half + ')';
+  document.getElementById('w-util').textContent    = w.laneUtil + '  (±' + w.laneUtil + ')';
+  document.getElementById('w-largo').textContent   = w.laneLargo;
+  document.getElementById('min-ally').textContent  = minAlly.toFixed(2);
+  document.getElementById('max-enemy').textContent = maxEnemy.toFixed(2);
+
+  const st = document.getElementById('status');
+  if (viola.length) {
+    st.className = 'err';
+    st.innerHTML = '<b>⚠ ' + viola.length + ' objeto(s) fuera del carril</b><div id="fails">' +
+                   viola.map(v => '• ' + v).join('<br>') + '</div>';
+  } else {
+    st.className = '';
+    st.innerHTML = '<b class="ok">✔ Todo dentro del carril</b><div id="fails">' +
+                   fallos.map(v => '• ' + v).join('<br>') + '</div>';
+  }
+}
+
+// hover
+canvas.addEventListener('mousemove', (e) => {
+  if (!T) return;
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  let enc = null;
+  lastActors.forEach((a, i) => {
+    const X0 = T.px(a.minX), X1 = T.px(a.maxX), Y0 = T.py(a.minZ), Y1 = T.py(a.maxZ);
+    if (mx >= Math.min(X0, X1) && mx <= Math.max(X0, X1) &&
+        my >= Math.min(Y0, Y1) && my <= Math.max(Y0, Y1)) enc = i;
+  });
+  hover = enc;
+});
+addEventListener('keydown', (e) => { if (e.key === 'r' || e.key === 'R') location.reload(); });
+
+iframe.addEventListener('load', conectar);
+setTimeout(conectar, 500);
+</script>
+</body>
+</html>
