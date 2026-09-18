@@ -27,8 +27,8 @@ const CONFIG = {
     nexusHealth: 1000,
     meleeSpacing: 1.1,
     mageSpacing: 0.9,
-    meleeSpeed: 0.48,
-    mageSpeed: 0.42,
+    meleeSpeed: 0.62,
+    mageSpeed: 0.55,
     axieSpeed: 1.5,
     smoothSpeed: 2.5,
     cameraSmoothSpeed: 3.0,
@@ -126,6 +126,12 @@ const CONFIG = {
     // El modelo del melee esta construido a escala 1.0 = 1.10 de alto,
     // asi que esta constante es un multiplicador fino, no una altura.
     MINION_SCALE: 0.85,
+    // Alto del modelo de minion a escala 1.0. Lo usa la barra de vida
+    // para colocarse por encima de la cabeza.
+    MINION_HEIGHT: 1.10,
+    // Altura de la barra de vida sobre la cabeza del Axie del jugador.
+    // El Axie mide ~1.9 de alto.
+    AXIE_HEALTH_BAR_HEIGHT: 2.15,
     MINION_COLLISION_DISTANCE: 0.70,
 
     // --- Disparo de la torre ---
@@ -366,6 +372,7 @@ function suavizarYEntidades(delta) {
 }
 
 let playerHealth = CONFIG.playerMaxHealth;
+let playerHealthSprite = null;   // barra 3D sobre la cabeza del Axie
 let playerMaxHealth = CONFIG.playerMaxHealth;
 let playerMana = CONFIG.playerMaxMana;
 let playerMaxMana = CONFIG.playerMaxMana;
@@ -634,7 +641,9 @@ function getHealthBarTexture(segments, visibleSegments, isEnemy) {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 128, 20);
     ctx.strokeStyle = '#fff'; ctx.strokeRect(0, 0, 128, 20);
     const sw = 124 / segments;
-    const colors = isEnemy ? ['#ff4444', '#ff6666'] : ['#4488ff', '#66aaff'];
+    // Colores tipo LoL: verde para aliado, rojo para enemigo. El par
+    // claro/oscuro da el degradado por segmentos que se ve en el juego.
+    const colors = isEnemy ? ['#c62828', '#e53935'] : ['#2e9e4f', '#41c463'];
     for (let i = 0; i < visibleSegments; i++) {
         ctx.fillStyle = i % 2 === 0 ? colors[0] : colors[1];
         ctx.fillRect(2 + i * sw, 2, sw - 1, 16);
@@ -657,6 +666,35 @@ function createHealthBar(segments = 10, isEnemy = false) {
 function updateHealthBarSprite(spriteMat, segments, visibleSegments, isEnemy) {
     spriteMat.map = getHealthBarTexture(segments, visibleSegments, isEnemy);
     spriteMat.needsUpdate = true;
+}
+
+// --- Barra de vida del Axie del jugador ------------------------------------
+// El jugador no tenia barra sobre la cabeza: solo el HUD de abajo, que queda
+// fuera de la vista mientras se mira el carril. Se cuelga del propio
+// playerModel como hijo, asi sigue al Axie sin tocar el bucle de movimiento.
+const PLAYER_HEALTH_SEGMENTS = 10;
+let playerHealthBarMat = null;
+
+function attachPlayerHealthBar() {
+    if (!playerModel) return;
+    if (playerHealthSprite && playerHealthSprite.parent) playerHealthSprite.parent.remove(playerHealthSprite);
+    const hb = createHealthBar(PLAYER_HEALTH_SEGMENTS, false);
+    // El sprite es hijo del modelo, que va escalado: la altura en mundo
+    // hay que dividirla por esa escala.
+    const escala = playerModel.scale ? playerModel.scale.x : 1.2;
+    hb.sprite.position.set(0, CONFIG.AXIE_HEALTH_BAR_HEIGHT / escala, 0);
+    hb.sprite.scale.set(1.4, 0.22, 1);
+    playerModel.add(hb.sprite);
+    playerHealthSprite = hb.sprite;
+    playerHealthBarMat = hb.spriteMat;
+    updatePlayerHealthBarSprite();
+}
+
+function updatePlayerHealthBarSprite() {
+    if (!playerHealthBarMat) return;
+    const pct = Math.max(0, Math.min(1, playerHealth / playerMaxHealth));
+    const vis = Math.max(0, Math.min(PLAYER_HEALTH_SEGMENTS, Math.ceil(pct * PLAYER_HEALTH_SEGMENTS)));
+    updateHealthBarSprite(playerHealthBarMat, PLAYER_HEALTH_SEGMENTS, vis, false);
 }
 
 const scene = new THREE.Scene();
@@ -2056,7 +2094,13 @@ class Minion {
         // TAREA D: el minion grande multiplica esa escala.
         const s = CONFIG.MINION_SCALE * (esBig ? CONFIG.BIG_MINION_SCALE : 1);
         this.group.scale.setScalar(s);
-        if (this.healthBarSprite) this.healthBarSprite.position.y = 0.66 / s;
+        // La barra va POR ENCIMA de la cabeza del minion, no sobre el
+        // pecho. El modelo mide MINION_HEIGHT en escala 1.0 y el grupo va
+        // escalado por s, asi que la altura local es altura_mundo / s.
+        if (this.healthBarSprite) {
+            const alturaMundo = CONFIG.MINION_HEIGHT * (esBig ? CONFIG.BIG_MINION_SCALE : 1) + 0.35;
+            this.healthBarSprite.position.y = alturaMundo / s;
+        }
 
         this.group.rotation.y = isEnemy ? Math.PI : 0;
         this.group.position.set(x, GROUND_Y - 0.5, z);
@@ -3304,6 +3348,7 @@ function loadSelectedAxie(axieId) {
             smoothPlayerPos.y = GROUND_Y;
             playerModel.traverse((n) => { if (n.isMesh) { n.castShadow = false; n.receiveShadow = false; } });
             scene.add(playerModel);
+            attachPlayerHealthBar();
             mixer = new THREE.AnimationMixer(playerModel);
             // Los GLB traen DOS juegos de clips: genericos (Idle, Walk) y con arma
             // (Cannon.Idle, Sword.Walk...). Un 'includes' a secas hacia que los
@@ -3362,6 +3407,7 @@ function loadDefaultAxie() {
             smoothPlayerPos.copy(playerSpawnPosition);
             smoothPlayerPos.y = GROUND_Y;
             scene.add(playerModel);
+            attachPlayerHealthBar();
             mixer = new THREE.AnimationMixer(playerModel);
             const clipIdle = gltf.animations.find(c => c.name.toLowerCase() === 'idle') || gltf.animations[0];
             const clipWalk = gltf.animations.find(c => c.name.toLowerCase() === 'walk');
@@ -3551,6 +3597,7 @@ function createItemHUD(h) {
 }
 
 function updatePlayerHUD() {
+    updatePlayerHealthBarSprite();   // barra 3D sobre la cabeza del Axie
     if (!playerHUD) return;
     if (isAITrainingMode) { updateDynamicHUDForCamera(); return; }
 
