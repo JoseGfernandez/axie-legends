@@ -3014,7 +3014,7 @@ class Minion {
 
             const esEstructura = finalTarget.type === 'tower' || finalTarget.type === 'nexus';
             let attackRange = this.attackRange;
-            if (esEstructura) attackRange += 0.5;
+            if (esEstructura) attackRange += 2.0;
 
             // Las torres estan desplazadas del eje del carril (azules en
             // x -2.5, rojas en x 3.11). Si la X del minion convergiera a la
@@ -3236,13 +3236,12 @@ function spawnWave() {
     // Antes se encolaban en 2 filas de 3, asi que salian de 3 en 3: tres
     // melee, luego otros dos, luego los mages. Con una sola fila el orden
     // de salida es el de formacion: melee 1..5 y despues mage 1..3.
-    const ROW_SPACING_Z = 1.3;
     // Margen desde el nexo hasta la primera fila. Sin el, la fila 0 de
     // melee nacia en la misma z que el nexo y sus 3 minions aparecian
     // medio dentro, sobresaliendo por detras: se veian como si hubieran
     // quedado rezagados. Medido en el carril: los melee no deben pisar
     // la caja del nexo.
-    const NEXUS_SPAWN_MARGIN = 1.6;
+    const NEXUS_SPAWN_MARGIN = 3.0;
 
     // El indice de formacion es POR BANDO, no global. Con un contador unico,
     // los aliados se quedaban con los indices bajos y los enemigos arrancaban
@@ -3253,7 +3252,7 @@ function spawnWave() {
 
     // ALIADOS melee: fila india desde el nexo, uno detras de otro.
     for (let i = 0; i < comp.melee; i++) {
-        const z = NEXUS_Z_ALLY - NEXUS_SPAWN_MARGIN + (comp.melee + comp.mage - 1 - i) * ROW_SPACING_Z;
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN;
         spawnQueue.push({
             team: 'ally', tipo: 'melee',
             index: queueIndexAlly,
@@ -3266,7 +3265,7 @@ function spawnWave() {
 
     // ALIADOS mage: siguen la fila india, detras de los melee.
     for (let i = 0; i < comp.mage; i++) {
-        const z = NEXUS_Z_ALLY - NEXUS_SPAWN_MARGIN + (comp.mage - 1 - i) * ROW_SPACING_Z;
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN;
         spawnQueue.push({
             team: 'ally', tipo: 'mage',
             index: queueIndexAlly,
@@ -3279,7 +3278,7 @@ function spawnWave() {
 
     // ENEMIGOS melee: fila india desde su nexo.
     for (let i = 0; i < comp.melee; i++) {
-        const z = NEXUS_Z_ENEMY + NEXUS_SPAWN_MARGIN - (comp.melee + comp.mage - 1 - i) * ROW_SPACING_Z;
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN;
         spawnQueue.push({
             team: 'enemy', tipo: 'melee',
             index: queueIndexEnemy,
@@ -3292,7 +3291,7 @@ function spawnWave() {
 
     // ENEMIGOS mage: detras de sus melee, en la misma fila india.
     for (let i = 0; i < comp.mage; i++) {
-        const z = NEXUS_Z_ENEMY + NEXUS_SPAWN_MARGIN - (comp.mage - 1 - i) * ROW_SPACING_Z;
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN;
         spawnQueue.push({
             team: 'enemy', tipo: 'mage',
             index: queueIndexEnemy,
