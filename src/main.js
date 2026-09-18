@@ -3026,11 +3026,6 @@ class Minion {
 
             const distToAttack = Math.max(0, dist - attackRange);
             const deployTarget = distToAttack < DEPLOY_TRIGGER_DIST ? 1 : 0;
-            // Al entrar en la zona de formacion reclama su hueco lateral.
-            // Es por orden de llegada: el 1.o el centro, el 2.o y 3.o se
-            // abren, el 4.o y 5.o se meten junto al centro. Solo se
-            // reclama una vez; el hueco se libera al morir el minion.
-            if (deployTarget === 1) reclamarSlot(this);
             // Despliegue lateral progresivo. Con 2.5 el minion se abria de golpe
         // al entrar en rango (tiron brusco); 1.1 lo reparte a lo largo de
         // ~1.5 s, que es el amago ordenado de los minions de LoL.
@@ -3125,10 +3120,13 @@ class Minion {
             let nz = this.group.position.z + this.direction * this.speed * delta;
             nz = Math.max(-CONFIG.minionLimitZ, Math.min(CONFIG.minionLimitZ, nz));
             this.group.position.z = nz;
-            // Sin objetivo (salida del nexo) mantiene SU carril de
-            // formacion. Antes convergia a 0 y todos salian apinados en
-            // el centro, para abrirse solo al llegar al enemigo.
-            this.group.position.x += (this.mySlotX - this.group.position.x) * Math.min(1, 2 * delta);
+            // Sin objetivo (saliendo del nexo) van TODOS por el centro:
+            // salen en fila india, uno detras de otro, no abiertos en
+            // abanico desde el nexo. El hueco lateral ya lo tienen
+            // reservado (reclamarSlot al nacer), y se abren a el solo al
+            // alcanzar la zona de formacion (ver el avance con
+            // deployProgress).
+            this.group.position.x += (0 - this.group.position.x) * Math.min(1, 2 * delta);
             this.group.rotation.y = this.isEnemy ? Math.PI : 0;
             this.deployProgress += (0 - this.deployProgress) * Math.min(1, 1.4 * delta);
         }
@@ -3234,10 +3232,10 @@ function spawnWave() {
     const NEXUS_Z_ALLY = -23.00;
     const NEXUS_Z_ENEMY = 22.94;
     const LANE_X = 0;
-    const MELEE_ROWS = 2;
-    const MELEE_PER_ROW = 3;
-    const MAGE_ROWS = 1;
-    const MAGE_PER_ROW = 3;
+    // Los minions salen en FILA INDIA, uno detras de otro, no en rejilla.
+    // Antes se encolaban en 2 filas de 3, asi que salian de 3 en 3: tres
+    // melee, luego otros dos, luego los mages. Con una sola fila el orden
+    // de salida es el de formacion: melee 1..5 y despues mage 1..3.
     const ROW_SPACING_Z = 1.3;
     // Margen desde el nexo hasta la primera fila. Sin el, la fila 0 de
     // melee nacia en la misma z que el nexo y sus 3 minions aparecian
@@ -3245,7 +3243,6 @@ function spawnWave() {
     // quedado rezagados. Medido en el carril: los melee no deben pisar
     // la caja del nexo.
     const NEXUS_SPAWN_MARGIN = 1.6;
-    const COL_SPACING_X = 1.1;
 
     // El indice de formacion es POR BANDO, no global. Con un contador unico,
     // los aliados se quedaban con los indices bajos y los enemigos arrancaban
@@ -3254,76 +3251,56 @@ function spawnWave() {
     let queueIndexAlly = 0;
     let queueIndexEnemy = 0;
 
-    // ALIADOS melee
-    for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + row * ROW_SPACING_Z;
-        for (let col = 0; col < MELEE_PER_ROW; col++) {
-            if (row * MELEE_PER_ROW + col >= comp.melee) break;
-            const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
-            spawnQueue.push({
-                team: 'ally', tipo: 'melee',
-                index: queueIndexAlly,
-                delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
-                x, z,
-                formationRow: row,
-                formationCol: col
-            });
-            queueIndexAlly++;
-        }
+    // ALIADOS melee: fila india desde el nexo, uno detras de otro.
+    for (let i = 0; i < comp.melee; i++) {
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + i * ROW_SPACING_Z;
+        spawnQueue.push({
+            team: 'ally', tipo: 'melee',
+            index: queueIndexAlly,
+            delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z,
+            formationCol: i
+        });
+        queueIndexAlly++;
     }
 
-    // ALIADOS mage
-    for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
-        for (let col = 0; col < MAGE_PER_ROW; col++) {
-            if (row * MAGE_PER_ROW + col >= comp.mage) break;
-            const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
-            spawnQueue.push({
-                team: 'ally', tipo: 'mage',
-                index: queueIndexAlly,
-                delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
-                x, z,
-                formationRow: row + MELEE_ROWS,
-                formationCol: col
-            });
-            queueIndexAlly++;
-        }
+    // ALIADOS mage: siguen la fila india, detras de los melee.
+    for (let i = 0; i < comp.mage; i++) {
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + (comp.melee + i) * ROW_SPACING_Z;
+        spawnQueue.push({
+            team: 'ally', tipo: 'mage',
+            index: queueIndexAlly,
+            delay: queueIndexAlly * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z,
+            formationCol: i
+        });
+        queueIndexAlly++;
     }
 
-    // ENEMIGOS melee
-    for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - row * ROW_SPACING_Z;
-        for (let col = 0; col < MELEE_PER_ROW; col++) {
-            if (row * MELEE_PER_ROW + col >= comp.melee) break;
-            const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
-            spawnQueue.push({
-                team: 'enemy', tipo: 'melee',
-                index: queueIndexEnemy,
-                delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
-                x, z,
-                formationRow: row,
-                formationCol: col
-            });
-            queueIndexEnemy++;
-        }
+    // ENEMIGOS melee: fila india desde su nexo.
+    for (let i = 0; i < comp.melee; i++) {
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - i * ROW_SPACING_Z;
+        spawnQueue.push({
+            team: 'enemy', tipo: 'melee',
+            index: queueIndexEnemy,
+            delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z,
+            formationCol: i
+        });
+        queueIndexEnemy++;
     }
 
-    // ENEMIGOS mage
-    for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
-        for (let col = 0; col < MAGE_PER_ROW; col++) {
-            if (row * MAGE_PER_ROW + col >= comp.mage) break;
-            const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
-            spawnQueue.push({
-                team: 'enemy', tipo: 'mage',
-                index: queueIndexEnemy,
-                delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
-                x, z,
-                formationRow: row + MELEE_ROWS,
-                formationCol: col
-            });
-            queueIndexEnemy++;
-        }
+    // ENEMIGOS mage: detras de sus melee, en la misma fila india.
+    for (let i = 0; i < comp.mage; i++) {
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - (comp.melee + i) * ROW_SPACING_Z;
+        spawnQueue.push({
+            team: 'enemy', tipo: 'mage',
+            index: queueIndexEnemy,
+            delay: queueIndexEnemy * CONFIG.SPAWN_STAGGER_DELAY,
+            x: LANE_X, z,
+            formationCol: i
+        });
+        queueIndexEnemy++;
     }
 
     // TAREA C+D: minion grande. Uno por bando y oleada, solo si al rival
@@ -3369,11 +3346,13 @@ function processSpawnQueue(delta) {
         if (spawnQueueTimer >= item.delay) {
             if (item.team === 'ally') {
                 const m = new Minion(item.x, item.z, false, item.tipo, item.index, item.formationCol);
+                reclamarSlot(m);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 aliados.push(m);
             } else {
                 const m = new Minion(item.x, item.z, true, item.tipo, item.index, item.formationCol);
+                reclamarSlot(m);
                 clampMinionToLane(m);
                 if (isFirstWave) { m.isGhost = true; m.ghostTimer = CONFIG.firstWaveGhostDuration; }
                 enemigos.push(m);
