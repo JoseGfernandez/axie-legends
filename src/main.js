@@ -107,7 +107,9 @@ const CONFIG = {
     NEXUS_GLB_ALLY: `${import.meta.env.BASE_URL}assets/nexus/nexus1.glb`,
     NEXUS_GLB_ENEMY: `${import.meta.env.BASE_URL}assets/nexus/nexus2.glb`,
     NEXUS_GLB_HEIGHT: 2.3,
-    NEXUS_GLB_SCALE_ALLY: 1.0,
+    // Misma escala para ambos: con 1.0 el azul salia mas grande que el
+    // rojo (0.85) y a simple vista desentonaban.
+    NEXUS_GLB_SCALE_ALLY: 0.85,
     NEXUS_GLB_SCALE_ENEMY: 0.85,
     NEXUS_GLB_ROTATION_Y_ALLY: 0,
     NEXUS_GLB_ROTATION_Y_ENEMY: Math.PI,
@@ -927,12 +929,13 @@ function procesarLanes() {
     // (x=+3.5); el nexo enemigo esta a la derecha (+2.5) y su tienda a la
     // izquierda (-3.5). Ademas va 3 unidades por detras en Z (z=+-24
     // contra +-21): con 1 sola unidad el nexo la tapaba entera. La tienda
-    // mide 1.30 de ancho, asi que en +-3.5 ocupa +-2.85 a +-4.15: dentro
-    // del carril (borde +-5) sin salirse.
-    if (!nexusAliado) nexusAliado = new Nexus(-2.5, -21, false);
-    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.5, 21, true);
-    if (!shopAliada) shopAliada = new Shop(3.5, -24, false);
-    if (!shopEnemiga) shopEnemiga = new Shop(-3.5, 24, true);
+    // mide 1.30 de ancho, asi que en +-2.5 ocupa +-1.85 a +-3.15: bien
+    // dentro del asfalto. En +-3.5 (+-2.85 a +-4.15) caia sobre el arcen,
+    // la franja oscura del borde, y se veia fuera del carril.
+    if (!nexusAliado) nexusAliado = new Nexus(-2.0, -21, false);
+    if (!nexusEnemigo) nexusEnemigo = new Nexus(2.0, 21, true);
+    if (!shopAliada) shopAliada = new Shop(2.5, -24, false);
+    if (!shopEnemiga) shopEnemiga = new Shop(-2.5, 24, true);
     if (towers.length === 0) {
         createTower(-2.5, -18, false, 1);
         createTower(-2.5, -6, false, 2);
