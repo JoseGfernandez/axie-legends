@@ -6264,6 +6264,21 @@ window.__debug = {
         });
         if (playerModel) push('Jugador', 'ally', { group: playerModel }, playerModel.position.x, playerModel.position.z);
         if (enemyAxieModel) push('Axie rival', 'enemy', { group: enemyAxieModel }, enemyAxieModel.position.x, enemyAxieModel.position.z);
+        // Los minions tambien van al carril, asi que la cenital los dibuja.
+        // Faltaban: la vista solo pintaba nexos, torres, tiendas y Axies,
+        // y por eso el reparto lateral no habia forma de revisarlo.
+        const etiquetaMinion = (m, i, bando) => {
+            const tipo = m.esBig ? 'grande' : (m.tipo || 'melee');
+            return 'Minion ' + bando + ' ' + tipo + ' ' + i;
+        };
+        aliados.forEach((m, i) => {
+            if (!m || !m.group) return;
+            push(etiquetaMinion(m, i, 'azul'), 'ally', m, m.group.position.x, m.group.position.z);
+        });
+        enemigos.forEach((m, i) => {
+            if (!m || !m.group) return;
+            push(etiquetaMinion(m, i, 'rojo'), 'enemy', m, m.group.position.x, m.group.position.z);
+        });
         return out;
     },
     get config() { return CONFIG; },
