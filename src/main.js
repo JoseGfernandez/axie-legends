@@ -920,15 +920,20 @@ function procesarLanes() {
     // x=+2.0 y el enemigo en x=-1.2: al lateral contrario de sus propias
     // torres. Con la camara casi de perfil (87 grados) ese cruce se nota
     // y cada nexo parecia descolgado hacia el bando equivocado.
+    //
+    // La tienda va 3 unidades POR DETRAS del nexo (z=+-24 contra +-21).
+    // Con solo 1 unidad de separacion (antes +-22) el nexo la tapaba
+    // entera desde la camara, que mira casi de perfil. A 3 unidades cada
+    // una se lee por separado y la tienda sigue dentro del carril (26).
     if (!nexusAliado) nexusAliado = new Nexus(-2.5, -21, false);
     if (!nexusEnemigo) nexusEnemigo = new Nexus(2.5, 21, true);
-    if (!shopAliada) shopAliada = new Shop(-2.5, -22, false);
-    if (!shopEnemiga) shopEnemiga = new Shop(2.5, 22, true);
+    if (!shopAliada) shopAliada = new Shop(-2.5, -24, false);
+    if (!shopEnemiga) shopEnemiga = new Shop(2.5, 24, true);
     if (towers.length === 0) {
-        createTower(-2.5, -18, false, 1);
-        createTower(-2.5, -6, false, 2);
-        createTower(2.5, 18, true, 1);
-        createTower(2.5, 6, true, 2);
+        createTower(-4.0, -18, false, 1);
+        createTower(-4.0, -6, false, 2);
+        createTower(4.0, 18, true, 1);
+        createTower(4.0, 6, true, 2);
     }
     inicializarCamaraFija();
 }
@@ -5010,10 +5015,10 @@ function abandonGame() {
     towers.length = 0;
     if (nexusAliado) { nexusAliado.isDead = false; nexusAliado.health = nexusAliado.maxHealth; nexusAliado.group.visible = true; nexusAliado.updateHealthBar(); }
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
-    createTower(-2.5, -18, false, 1);
-    createTower(-2.5, -6, false, 2);
-    createTower(2.5, 18, true, 1);
-    createTower(2.5, 6, true, 2);
+    createTower(-4.0, -18, false, 1);
+    createTower(-4.0, -6, false, 2);
+    createTower(4.0, 18, true, 1);
+    createTower(4.0, 6, true, 2);
     gameStarted = false;
     startTimer = CONFIG.SPAWN_DELAY;
     waveNumber = 1;
@@ -5285,10 +5290,10 @@ async function startAIGame(axieId) {
     towers.length = 0;
     if (nexusAliado) { nexusAliado.isDead = false; nexusAliado.health = nexusAliado.maxHealth; nexusAliado.group.visible = true; nexusAliado.updateHealthBar(); }
     if (nexusEnemigo) { nexusEnemigo.isDead = false; nexusEnemigo.health = nexusEnemigo.maxHealth; nexusEnemigo.group.visible = true; nexusEnemigo.updateHealthBar(); }
-    createTower(-2.5, -18, false, 1);
-    createTower(-2.5, -6, false, 2);
-    createTower(2.5, 18, true, 1);
-    createTower(2.5, 6, true, 2);
+    createTower(-4.0, -18, false, 1);
+    createTower(-4.0, -6, false, 2);
+    createTower(4.0, 18, true, 1);
+    createTower(4.0, 6, true, 2);
     resetEnemyAxie();
     inicializarCamaraFija();
     resetDynamicCamera();
