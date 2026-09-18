@@ -127,6 +127,42 @@ export const AXIES_DATA = {
     },
 };
 
+// =============================================
+// PERFIL DE COMBATE POR AXIE (ataques basicos)
+// =============================================
+// Cada Axie trae en su GLB clips de arma con el prefijo de su propia arma
+// (Cannon.Idle, Sword.Walk, Hammer.Attack...). Aqui se declara, por Axie:
+//   clipArma : prefijo de sus clips con arma, o null si no los trae
+//   tipo     : 'rango' lanza proyectil | 'melee' golpe fisico sin proyectil
+//   ataque   : nombre del clip de ataque dentro del GLB
+//   factor   : tamano del arma respecto al Axie (para calibrar a ojo)
+//   giroArma : grados de correccion de orientacion del arma en la mano
+// De los 7 GLB, tripp es el unico SIN Axe.Idle/Axe.Walk (solo trae
+// Axe.Attack), asi que conserva los clips genericos y su prefijo va a null.
+export const PERFIL_COMBATE = {
+    // cancelarHueso: Bing trae el hueso Weapon_R_JNT MAL animado en los clips de
+    // combate (medido en el GLB): Cannon.Idle [-0.497, 0.501, ...], Cannon.Walk
+    // [-0.732, 0.015, ...], Cannon.Attack [-0.723, -0.105, ...]. No hay un angulo
+    // fijo que sirva para los tres, asi que su arma se orienta respecto al modelo
+    // en vez de heredar el hueso. Los otros seis lo traen en identidad en todos
+    // los clips (desviacion 0.000) y funcionan copiando la rotacion del hueso.
+    bing:     { clipArma: 'Cannon', tipo: 'rango', ataque: 'Cannon.Attack', factor: 0.60, giroArma: 0, cancelarHueso: true },
+    kotaro:   { clipArma: 'Sword',  tipo: 'melee', ataque: 'Sword.Attack',  factor: 0.72, giroArma: 0 },
+    kibo:     { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0 },
+    paladill: { clipArma: 'Hammer', tipo: 'melee', ataque: 'Hammer.Attack', factor: 0.60, giroArma: 0 },
+    pomodoro: { clipArma: 'Staff',  tipo: 'rango', ataque: 'Staff.Attack',  factor: 0.60, giroArma: 0 },
+    xia:      { clipArma: 'Axe',    tipo: 'melee', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0 },
+    tripp:    { clipArma: null,     tipo: 'rango', ataque: 'Axe.Attack',    factor: 0.60, giroArma: 0 },
+};
+
+// Devuelve el perfil de combate de un Axie. Si el id no existe devuelve los
+// valores de Bing, para que ningun llamador tenga que defenderse de undefined.
+export function getPerfilCombate(id) {
+    const p = PERFIL_COMBATE[id];
+    if (!p) return Object.assign({}, PERFIL_COMBATE.bing);
+    return Object.assign({}, PERFIL_COMBATE.bing, p);
+}
+
 export function getAxieById(id) {
     return AXIES_DATA[id] || null;
 }

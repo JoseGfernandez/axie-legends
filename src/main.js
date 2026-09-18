@@ -2,7 +2,7 @@
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MenuScreen } from './ui/MenuScreen.js';
-import { getAxieById, getAllAxies } from './config/axies.js';
+import { getAxieById, getAllAxies, getPerfilCombate } from './config/axies.js';
 
 // 🔧 CORRECCIÓN 1: GLTFLoader compartido
 const sharedGLTFLoader = new GLTFLoader();
@@ -208,7 +208,10 @@ function attachAxieWeapon(axieModel, axieData) {
         const escalaHueso = new THREE.Vector3();
         hueso.getWorldScale(escalaHueso);
         const factorPadre = escalaHueso.x || 1;
-        arma.scale.setScalar(((altura * 0.60) / wMax) / factorPadre);
+        // Factor por Axie desde el catalogo (config/axies.js) para poder
+        // calibrar el tamano de cada arma sin tocar el motor.
+        const perfil = getPerfilCombate(axieData.id);
+        arma.scale.setScalar(((altura * perfil.factor) / wMax) / factorPadre);
 
         hueso.add(arma);
         arma.position.set(0, 0, 0);
@@ -219,7 +222,15 @@ function attachAxieWeapon(axieModel, axieData) {
         // devolverla a su orientacion natural (Z al frente en estos GLB).
         const rotHueso = new THREE.Quaternion();
         hueso.getWorldQuaternion(rotHueso);
-        arma.quaternion.copy(rotHueso.invert());
+        // Orientacion RELATIVA: copiar (no invertir) la rotacion del hueso hace
+        // que el arma siga el giro natural del brazo y apunte adonde mira el
+        // personaje. Invertirla la dejaba clavada en una orientacion fija del
+        // mundo: le funcionaba a Kotaro de casualidad, pero a Bing le ponia el
+        // canon mirando a la espalda. El desvio se corrige por Axie (grados).
+        arma.quaternion.copy(rotHueso);
+        if (perfil.giroArma) {
+            arma.rotateY(THREE.MathUtils.degToRad(perfil.giroArma));
+        }
 
         console.log('Arma de ' + axieData.nombre + ' en ' + hueso.name + ' (escala ' + arma.scale.x.toFixed(3) + ')');
     }, undefined, (err) => {
@@ -1372,25 +1383,162 @@ class TowerProjectile {
     }
 }
 
+// ============================================================
+// ATAQUE BASICO DEL AXIE
+// ------------------------------------------------------------
+// Bing (canon) dispara un proyectil bala desde el canon.
+// Kotaro (katana) da un golpe melee sin proyectil.
+// Los dos reproducen el clip de ataque del GLB, que esta hecho para
+// ir con el arma, para que la animacion y el disparo coincidan.
+// ============================================================
+function dispararAtaqueJugador(target, origen, dmg) {
+    // 1) Clip de ataque (Cannon.Attack / Sword.Attack), si el GLB lo trae
+    if (animAttack) {
+        animAttack.reset();
+        animAttack.setEffectiveWeight(1);
+        animAttack.setLoop(THREE.LoopOnce, 1);
+        animAttack.clampWhenFinished = true;
+        if (animWalk) animWalk.stop();
+        if (animIdle) animIdle.stop();
+        animAttack.fadeIn(0.05).play();
+        attackAnimTimer = 0.55;
+        currentAnim = 'attack';
+    }
+
+    if (currentAttackTipo === 'melee') {
+        // Golpe fisico: dano inmediato, sin proyectil
+        aplicarDanoMeleeJugador(target, dmg);
+        return;
+    }
+
+    // Disparo a distancia: el proyectil nace del arma, no del centro del cuerpo.
+    // El aspecto lo decide el arma: canon -> bala, baston -> orbe, hacha magica -> rayo.
+    const punto = puntoDeDisparo(origen);
+    const proj = new PlayerProjectile(punto, target, dmg, proyectilDelPerfil());
+    playerProjectiles.push(proj);
+}
+
+// Traduce el arma del Axie (segun el catalogo) al aspecto del proyectil.
+function proyectilDelPerfil() {
+    const perfil = getPerfilCombate(selectedAxieId);
+    switch (perfil.clipArma) {
+        case 'Cannon': return 'bala';
+        case 'Staff':  return 'orbe';
+        case 'Axe':    return 'rayo';
+        default:       return 'orb';
+    }
+}
+
+// Devuelve el punto de salida del canon: mano derecha del Axie si se puede
+// localizar el hueso, si no el origen elevado a la altura del pecho.
+function puntoDeDisparo(origen) {
+    const p = origen.clone();
+    if (playerModel) {
+        const hueso = (() => {
+            let hit = null;
+            playerModel.traverse((n) => {
+                if (!hit && n.isBone && n.name.toLowerCase().includes('weapon_r')) hit = n;
+            });
+            return hit;
+        })();
+        if (hueso) {
+            const wp = new THREE.Vector3();
+            hueso.getWorldPosition(wp);
+            p.copy(wp);
+            return p;
+        }
+    }
+    p.y = 0.9;
+    return p;
+}
+
+// Dano melee directo al objetivo (Kotaro con la katana)
+function aplicarDanoMeleeJugador(target, dmg) {
+    if (!target || target.isDead) return;
+    const wasEnemyAxie = target.type === 'enemy_axie';
+    const wasTower = target.type === 'tower';
+    const wasNexus = target.type === 'nexus';
+    const wasMinion = target.type === 'minion';
+
+    if (wasEnemyAxie && enemyAxie) {
+        const prev = enemyAxie.health;
+        enemyAxieTakeDamage(dmg);
+        if (prev > 0 && enemyAxieIsDead) {
+            givePlayerGold(ECONOMY.REWARD_ENEMY_AXIE_KILL, '🤖 Axie enemigo eliminado');
+        }
+        return;
+    }
+    if (target.ref && target.ref.health !== undefined) {
+        target.ref.health -= dmg;
+        if (target.ref.updateHealthBar) target.ref.updateHealthBar();
+        if (target.ref.flashHit) target.ref.flashHit();
+        if (target.ref.health <= 0 && target.ref.die) {
+            target.ref.die('player');
+            if (wasMinion) givePlayerGold(ECONOMY.REWARD_MINION_KILL, '👾 Minion eliminado');
+            else if (wasTower) givePlayerGold(ECONOMY.REWARD_TOWER_KILL, '🗼 Torre destruida');
+            else if (wasNexus) givePlayerGold(ECONOMY.REWARD_NEXUS_KILL, '💎 Nexo destruido');
+        }
+    }
+}
+
 class PlayerProjectile {
-    constructor(startPos, target, damage = 15) {
+    constructor(startPos, target, damage = 15, tipo = 'orb') {
         this.target = target; this.damage = damage; this.speed = CONFIG.projectileSpeed;
         this.active = true; this.targetRef = target;
-        const color = 0x44ff88;
-        const geo = new THREE.SphereGeometry(0.15, 8, 8);
-        const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.0 });
-        this.mesh = new THREE.Mesh(geo, mat);
-        this.mesh.position.copy(startPos); this.mesh.position.y = 0.5;
+        this.tipo = tipo;
+
+        if (tipo === 'bala') {
+            // Bala de canon: esfera caliente con estela, sale del canon de Bing.
+            const color = 0xffaa33;
+            const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.2 });
+            this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 10), mat);
+            const halo = new THREE.Mesh(
+                new THREE.SphereGeometry(0.20, 10, 10),
+                new THREE.MeshBasicMaterial({ color: 0xffdd88, transparent: true, opacity: 0.35 })
+            );
+            this.mesh.add(halo);
+        } else if (tipo === 'rayo') {
+            // Rayo magico (Pomodoro con el baston, Tripp con el hacha): núcleo
+            // violeta alargado en la direccion del disparo, con un halo suelto.
+            // Se alarga en el eje Z porque el proyectil avanza hacia el objetivo.
+            const color = 0xbb66ff;
+            const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.6 });
+            this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), mat);
+            this.mesh.scale.set(0.75, 0.75, 1.9);
+            const halo = new THREE.Mesh(
+                new THREE.SphereGeometry(0.26, 10, 10),
+                new THREE.MeshBasicMaterial({ color: 0xddaaff, transparent: true, opacity: 0.30 })
+            );
+            halo.scale.set(0.7, 0.7, 1.6);
+            this.mesh.add(halo);
+        } else if (tipo === 'orbe') {
+            // Orbe del baston (Pomodoro): mas pequeno y verde, sin halo caliente.
+            const color = 0x66ffcc;
+            const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 });
+            this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), mat);
+            const halo = new THREE.Mesh(
+                new THREE.SphereGeometry(0.22, 10, 10),
+                new THREE.MeshBasicMaterial({ color: 0xaaffee, transparent: true, opacity: 0.28 })
+            );
+            this.mesh.add(halo);
+        } else {
+            // Orbe magico (por defecto, el del jugador sin arma de fuego).
+            const color = 0x44ff88;
+            const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.0 });
+            this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), mat);
+        }
+
+        this.mesh.position.copy(startPos);
         scene.add(this.mesh);
         this.startPos = startPos.clone();
-        this.endPos = target.group.position.clone(); this.endPos.y = 0.5;
+        this.endPos = target.group.position.clone(); this.endPos.y = startPos.y;
         this.progress = 0;
     }
 
     update(delta) {
         if (!this.active) return;
         if (!this.targetRef || !this.targetRef.group || this.targetRef.isDead) { this.active = false; scene.remove(this.mesh); return; }
-        this.endPos.copy(this.targetRef.group.position); this.endPos.y = 0.5;
+        this.endPos.copy(this.targetRef.group.position); this.endPos.y = this.startPos.y;
         this.progress += delta * this.speed;
         if (this.progress >= 1) { this.hit(); return; }
         const cur = new THREE.Vector3().lerpVectors(this.startPos, this.endPos, this.progress);
@@ -2971,6 +3119,9 @@ let playerModel = null;
 let mixer = null;
 let animIdle = null;
 let animWalk = null;
+let animAttack = null;         // clip Attack con arma (Cannon.Attack / Sword.Attack)
+let currentAttackTipo = 'bala'; // 'bala' para Axies de fuego, 'melee' para katana
+let attackAnimTimer = 0;       // temporizador del gesto de ataque del Axie
 let currentAnim = 'idle';
 let targetPosition = null;
 let isMovingToTarget = false;
@@ -3046,11 +3197,37 @@ function loadSelectedAxie(axieId) {
             playerModel.traverse((n) => { if (n.isMesh) { n.castShadow = false; n.receiveShadow = false; } });
             scene.add(playerModel);
             mixer = new THREE.AnimationMixer(playerModel);
-            gltf.animations.forEach(clip => {
-                const name = clip.name.toLowerCase();
-                if (name.includes('idle')) animIdle = mixer.clipAction(clip);
-                if (name.includes('walk')) animWalk = mixer.clipAction(clip);
-            });
+            // Los GLB traen DOS juegos de clips: genericos (Idle, Walk) y con arma
+            // (Cannon.Idle, Sword.Walk...). Un 'includes' a secas hacia que los
+            // clips con arma sobrescribieran a los genericos por orden de lista, y
+            // el Axie acababa con la pose de transporte (canon hacia atras).
+            // Se elige a proposito: si lleva arma, se usan los clips de arma.
+            // El prefijo (Cannon, Sword, Hammer, Staff, Axe) sale del perfil del
+            // Axie. Tripp no trae Axe.Idle/Axe.Walk, y con prefijo null conserva
+            // los genericos. Si no, el Axie se quedaria sin reposo ni caminata.
+            const perfilJugador = getPerfilCombate(axieData.id);
+            const prefijo = perfilJugador.clipArma ? perfilJugador.clipArma.toLowerCase() + '.' : null;
+            const elegirClip = (deseado) => {
+                let generico = null, conArma = null;
+                gltf.animations.forEach(clip => {
+                    const name = clip.name.toLowerCase();
+                    if (!name.includes(deseado)) return;
+                    const esDeArma = prefijo ? name.startsWith(prefijo) : false;
+                    if (esDeArma) { if (!conArma) conArma = clip; }
+                    else if (name === deseado) { generico = clip; }
+                });
+                return conArma || generico;
+            };
+            const clipIdle = elegirClip('idle');
+            const clipWalk = elegirClip('walk');
+            if (clipIdle) animIdle = mixer.clipAction(clipIdle);
+            if (clipWalk) animWalk = mixer.clipAction(clipWalk);
+            const clipAttack = elegirClip('attack');
+            if (clipAttack) animAttack = mixer.clipAction(clipAttack);
+            // Bing dispara con el canon (a distancia); Kotaro pega con la katana (melee).
+            // Tipo de ataque desde el catalogo: 'rango' lanza proyectil (Bing,
+            // Pomodoro, Tripp) y 'melee' da golpe fisico (Kotaro, Kibo, Paladill, Xia).
+            currentAttackTipo = (perfilJugador.tipo === 'melee') ? 'melee' : 'bala';
             if (animIdle) animIdle.play();
             attachAxieWeapon(playerModel, axieData);
             axieLoaded = true;
@@ -3078,11 +3255,10 @@ function loadDefaultAxie() {
             smoothPlayerPos.y = GROUND_Y;
             scene.add(playerModel);
             mixer = new THREE.AnimationMixer(playerModel);
-            gltf.animations.forEach(clip => {
-                const name = clip.name.toLowerCase();
-                if (name.includes('idle')) animIdle = mixer.clipAction(clip);
-                if (name.includes('walk')) animWalk = mixer.clipAction(clip);
-            });
+            const clipIdle = gltf.animations.find(c => c.name.toLowerCase() === 'idle') || gltf.animations[0];
+            const clipWalk = gltf.animations.find(c => c.name.toLowerCase() === 'walk');
+            if (clipIdle) animIdle = mixer.clipAction(clipIdle);
+            if (clipWalk) animWalk = mixer.clipAction(clipWalk);
             if (animIdle) animIdle.play();
             axieLoaded = true;
             currentAxieName = 'Bing';
@@ -3362,6 +3538,8 @@ let enemyAxieModel = null;
 let enemyAxieMixer = null;
 let enemyAxieAnimIdle = null;
 let enemyAxieAnimWalk = null;
+let enemyAxieAnimAttack = null;   // clip de ataque con arma del Axie enemigo
+let enemyAxieAttackTimer = 0;     // temporizador del gesto de ataque
 let enemyAxieCurrentAnim = 'idle';
 let enemyAxieAttackCooldown = 0;
 let enemyAxieHealth = CONFIG.enemyMaxHealth;
@@ -3431,11 +3609,29 @@ function spawnEnemyAxie() {
         enemyAxieModel.traverse((n) => { if (n.isMesh) { n.castShadow = false; n.receiveShadow = false; } });
         scene.add(enemyAxieModel);
         enemyAxieMixer = new THREE.AnimationMixer(enemyAxieModel);
-        gltf.animations.forEach(clip => {
-            const name = clip.name.toLowerCase();
-            if (name.includes('idle')) enemyAxieAnimIdle = enemyAxieMixer.clipAction(clip);
-            if (name.includes('walk')) enemyAxieAnimWalk = enemyAxieMixer.clipAction(clip);
-        });
+        // Mismo criterio que el jugador: si el Axie lleva arma, se usan los clips
+        // con arma (Cannon.Idle, Sword.Walk...) en vez de los genericos.
+        const perfilEnemigo = getPerfilCombate(randomAxie.id);
+        const prefijoE = perfilEnemigo.clipArma ? perfilEnemigo.clipArma.toLowerCase() + '.' : null;
+        const elegirClipE = (deseado) => {
+            let generico = null, conArma = null;
+            gltf.animations.forEach(clip => {
+                const name = clip.name.toLowerCase();
+                if (!name.includes(deseado)) return;
+                const esDeArma = prefijoE ? name.startsWith(prefijoE) : false;
+                if (esDeArma) { if (!conArma) conArma = clip; }
+                else if (name === deseado) { generico = clip; }
+            });
+            return conArma || generico;
+        };
+        const clipIdleE = elegirClipE('idle');
+        const clipWalkE = elegirClipE('walk');
+        // El clip de ataque se busca por NOMBRE EXACTO del catalogo (Cannon.Attack,
+        // Sword.Attack...). Tripp no trae Idle/Walk con arma pero si Axe.Attack.
+        const clipAttackE = gltf.animations.find(c => c.name === perfilEnemigo.ataque) || elegirClipE('attack');
+        if (clipIdleE) enemyAxieAnimIdle = enemyAxieMixer.clipAction(clipIdleE);
+        if (clipWalkE) enemyAxieAnimWalk = enemyAxieMixer.clipAction(clipWalkE);
+        if (clipAttackE) enemyAxieAnimAttack = enemyAxieMixer.clipAction(clipAttackE);
         if (enemyAxieAnimIdle) { enemyAxieAnimIdle.play(); enemyAxieCurrentAnim = 'idle'; }
         attachAxieWeapon(enemyAxieModel, randomAxie);
         const hb = createHealthBar(ENEMY_HEALTH_SEGMENTS, true);
@@ -3649,8 +3845,27 @@ function findBestEnemyTarget() {
     return candidates[0];
 }
 
+// Reproduce el clip de ataque del Axie enemigo y lanza su proyectil si es de
+// rango. El enemigo ataca con el mismo criterio que el jugador (rango/melee),
+// para que los dos bandos se vean igual.
+function reproducirAtaqueEnemigo(target) {
+    if (enemyAxieAnimAttack) {
+        enemyAxieAnimAttack.reset();
+        enemyAxieAnimAttack.setEffectiveWeight(1);
+        enemyAxieAnimAttack.setLoop(THREE.LoopOnce, 1);
+        enemyAxieAnimAttack.clampWhenFinished = true;
+        if (enemyAxieAnimWalk) enemyAxieAnimWalk.stop();
+        if (enemyAxieAnimIdle) enemyAxieAnimIdle.stop();
+        enemyAxieAnimAttack.fadeIn(0.05).play();
+        enemyAxieAttackTimer = 0.55;
+        enemyAxieCurrentAnim = 'attack';
+    }
+}
+
 function enemyAxieAttack(target) {
     if (!target || target.isDead || enemyAxieIsDead) return;
+    // Gesto de ataque: mismo clip con arma que el jugador.
+    reproducirAtaqueEnemigo(target);
     if (target.type === 'tower' || target.type === 'nexus') {
         enemyAxieBrain.weights.focusStructure = Math.min(2.5, enemyAxieBrain.weights.focusStructure + 0.03);
     }
@@ -4384,8 +4599,7 @@ function updatePlayerAsAI(delta) {
                 sp.y = 0.5;
                 let dmg = Math.round(attackDamage * playerAIBonuses.damageMultiplier);
                 if (Math.random() < playerAIBonuses.critChance) dmg = Math.round(dmg * 2);
-                const proj = new PlayerProjectile(sp, vt, dmg);
-                playerProjectiles.push(proj);
+                dispararAtaqueJugador(vt, sp, dmg);
                 attackCooldown = attackSpeed;
                 isAttacking = true;
                 setTimeout(() => { isAttacking = false; }, 50);
@@ -5356,8 +5570,8 @@ function gameLoop(time, token) {
                         if (attackCooldown <= 0 && !isAttacking) {
                             const startPos = playerModel.position.clone();
                             startPos.y = 0.5;
-                            const proj = new PlayerProjectile(startPos, window.currentTarget, attackDamage);
-                            playerProjectiles.push(proj);
+                            // Gesto de ataque: el Axie levanta el arma (Cannon.Attack / Sword.Attack)
+                            dispararAtaqueJugador(window.currentTarget, startPos, attackDamage);
                             attackCooldown = attackSpeed;
                             isAttacking = true;
                             setTimeout(() => { isAttacking = false; }, 100);
@@ -5382,6 +5596,45 @@ function gameLoop(time, token) {
                     openShop();
                 }
             }
+        }
+    }
+
+    // Temporizador del gesto de ataque del Axie ENEMIGO: mismo criterio que el
+    // del jugador, para que al acabar el clip no se quede clavado en el golpe.
+    if (enemyAxieAttackTimer > 0) {
+        enemyAxieAttackTimer -= delta;
+        if (enemyAxieAttackTimer <= 0) {
+            if (enemyAxieAnimAttack) enemyAxieAnimAttack.fadeOut(0.12);
+            const siguienteE = enemyAxieAnimWalk && enemyAxieCurrentAnim === 'walk' ? enemyAxieAnimWalk : enemyAxieAnimIdle;
+            if (siguienteE) {
+                siguienteE.reset();
+                siguienteE.setEffectiveWeight(1);
+                siguienteE.fadeIn(0.12).play();
+                enemyAxieCurrentAnim = (siguienteE === enemyAxieAnimWalk) ? 'walk' : 'idle';
+            }
+            enemyAxieAttackTimer = 0;
+        }
+    }
+
+    // Temporizador del gesto de ataque del Axie: al terminar el clip de ataque
+    // (Cannon.Attack / Sword.Attack), vuelve a idle o walk. Sin esto el Axie se
+    // queda clavado en el ultimo frame porque el clip va con clampWhenFinished.
+    if (attackAnimTimer > 0) {
+        attackAnimTimer -= delta;
+        if (attackAnimTimer <= 0) {
+            if (animAttack) animAttack.fadeOut(0.12);
+            const quieroMover = isMovingToTarget || (window.currentTarget && !window.currentTarget.isDead &&
+                playerModel && playerModel.position.distanceTo(
+                    window.currentTarget.group ? window.currentTarget.group.position : window.currentTarget.position
+                ) > attackRange);
+            const siguiente = quieroMover ? animWalk : animIdle;
+            if (siguiente) {
+                siguiente.reset();
+                siguiente.setEffectiveWeight(1);
+                siguiente.fadeIn(0.12).play();
+                currentAnim = quieroMover ? 'walk' : 'idle';
+            }
+            attackAnimTimer = 0;
         }
     }
 
