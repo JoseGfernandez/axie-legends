@@ -3077,6 +3077,12 @@ function spawnWave() {
     const MAGE_ROWS = 1;
     const MAGE_PER_ROW = 3;
     const ROW_SPACING_Z = 1.3;
+    // Margen desde el nexo hasta la primera fila. Sin el, la fila 0 de
+    // melee nacia en la misma z que el nexo y sus 3 minions aparecian
+    // medio dentro, sobresaliendo por detras: se veian como si hubieran
+    // quedado rezagados. Medido en el carril: los melee no deben pisar
+    // la caja del nexo.
+    const NEXUS_SPAWN_MARGIN = 1.6;
     const COL_SPACING_X = 1.1;
 
     // El indice de formacion es POR BANDO, no global. Con un contador unico,
@@ -3088,7 +3094,7 @@ function spawnWave() {
 
     // ALIADOS melee
     for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY + row * ROW_SPACING_Z;
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + row * ROW_SPACING_Z;
         for (let col = 0; col < MELEE_PER_ROW; col++) {
             if (row * MELEE_PER_ROW + col >= comp.melee) break;
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
@@ -3106,7 +3112,7 @@ function spawnWave() {
 
     // ALIADOS mage
     for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ALLY + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
+        const z = NEXUS_Z_ALLY + NEXUS_SPAWN_MARGIN + MELEE_ROWS * ROW_SPACING_Z + row * ROW_SPACING_Z + 0.5;
         for (let col = 0; col < MAGE_PER_ROW; col++) {
             if (row * MAGE_PER_ROW + col >= comp.mage) break;
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
@@ -3124,7 +3130,7 @@ function spawnWave() {
 
     // ENEMIGOS melee
     for (let row = 0; row < MELEE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY - row * ROW_SPACING_Z;
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - row * ROW_SPACING_Z;
         for (let col = 0; col < MELEE_PER_ROW; col++) {
             if (row * MELEE_PER_ROW + col >= comp.melee) break;
             const x = LANE_X + (col - (MELEE_PER_ROW - 1) / 2) * COL_SPACING_X;
@@ -3142,7 +3148,7 @@ function spawnWave() {
 
     // ENEMIGOS mage
     for (let row = 0; row < MAGE_ROWS; row++) {
-        const z = NEXUS_Z_ENEMY - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
+        const z = NEXUS_Z_ENEMY - NEXUS_SPAWN_MARGIN - MELEE_ROWS * ROW_SPACING_Z - row * ROW_SPACING_Z - 0.5;
         for (let col = 0; col < MAGE_PER_ROW; col++) {
             if (row * MAGE_PER_ROW + col >= comp.mage) break;
             const x = LANE_X + (col - (MAGE_PER_ROW - 1) / 2) * COL_SPACING_X * 1.2;
