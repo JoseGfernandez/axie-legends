@@ -62,6 +62,11 @@
 
 <div class="panel" id="hud">
   <h1>🗺️ EDITOR DE POSICIONES · CARRIL</h1>
+  <div style="color:#8a8aa8; font-size:10.5px; line-height:1.5; margin-bottom:7px;">
+    arrastrar = mover · rueda = zoom<br>
+    <b>botón medio</b> o <b>espacio</b>+arrastrar = mover el lienzo<br>
+    +/− zoom · 0 reencuadrar · C copiar · R recargar
+  </div>
   <div class="row"><span>Ancho modelo</span><b id="w-modelo">—</b></div>
   <div class="row"><span>Ancho jugable</span><b id="w-util">—</b></div>
   <div class="row"><span>Largo</span><b id="w-largo">—</b></div>
@@ -120,6 +125,9 @@ let cambios = {};                // label -> {x, z}
 let fallos = [];
 let zoom = 1;                    // factor de zoom sobre el encuadre automatico
 let pan  = { x: 0, z: 0 };       // desplazamiento del encuadre
+let panning = false;             // arrastrando el lienzo (boton medio o espacio)
+let panIni = { x: 0, z: 0, mx: 0, my: 0 };
+let espacio = false;             // barra espaciadora mantenida
 
 // posicion de reposo conocida, para poder restaurar y para el diff
 const ORIGINAL = {};
@@ -403,6 +411,17 @@ canvas.addEventListener('mousedown', (e) => {
   if (!T) return;
   const r = canvas.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
+
+  // Boton medio o espacio + arrastrar = mover el lienzo (pan). Es el gesto
+  // habitual en mapas y editores 2D, y no choca con mover objetos.
+  if (e.button === 1 || espacio) {
+    panning = true;
+    panIni = { x: pan.x, z: pan.z, mx, my };
+    canvas.style.cursor = 'move';
+    return;
+  }
+  if (e.button !== 0) return;   // solo el boton izquierdo mueve objetos
+
   const i = hitTest(mx, my);
   if (i === null) { seleccion = null; document.getElementById('sel-tit').textContent = 'SIN SELECCIÓN';
     document.getElementById('sel-body').innerHTML = '<div class="vacio">Haz clic en un objeto del mapa para moverlo.</div>';
@@ -422,10 +441,18 @@ canvas.addEventListener('mousedown', (e) => {
 // El mousemove va en window, no en el canvas: al arrastrar rapido el
 // puntero puede salir del canvas y el canvas dejaria de recibir el evento.
 window.addEventListener('mousemove', (e) => {
-  e.preventDefault();
   if (!T) return;
   const r = canvas.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
+
+  if (panning) {
+    e.preventDefault();
+    // El pan esta en unidades de mundo: convertir el desplazamiento en
+    // pixeles a mundo con la escala vigente.
+    pan.x = panIni.x + (mx - panIni.mx) / T.s;
+    pan.z = panIni.z + (my - panIni.my) / T.s;
+    return;
+  }
 
   if (arrastrando && seleccion !== null) {
     const a = lastActors[seleccion];
@@ -440,11 +467,20 @@ window.addEventListener('mousemove', (e) => {
     mover(a.label, +nx.toFixed(2), +nz.toFixed(2));
     return;
   }
+  if (panning || espacio) { hover = null; return; }
   hover = hitTest(mx, my);
   canvas.style.cursor = hover !== null ? 'grab' : 'crosshair';
 });
 
-addEventListener('mouseup', () => { arrastrando = false; canvas.style.cursor = 'crosshair'; });
+// El boton derecho no hace nada aqui: que no salte el menu contextual
+// al intentar mover el lienzo.
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+addEventListener('mouseup', () => {
+  arrastrando = false;
+  panning = false;
+  canvas.style.cursor = espacio ? 'move' : 'crosshair';
+});
 
 // Rueda del raton = zoom hacia el cursor. passive:false para poder
 // cancelar el scroll de la pagina.
@@ -455,7 +491,12 @@ canvas.addEventListener('wheel', (e) => {
   zoomEn(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
 }, { passive: false });
 
+addEventListener('keyup', (e) => {
+  if (e.key === ' ') { espacio = false; canvas.style.cursor = 'crosshair'; }
+});
+
 addEventListener('keydown', (e) => {
+  if (e.key === ' ') { espacio = true; canvas.style.cursor = 'move'; e.preventDefault(); return; }
   if (e.key === 'r' || e.key === 'R') { location.reload(); return; }
   // Zoom por teclado: + / - y 0 para reencuadrar.
   if (e.key === '+' || e.key === '=') { if (T) zoomEn(innerWidth / 2, innerHeight / 2, 1.25); return; }
